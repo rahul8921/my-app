@@ -245,9 +245,9 @@ export default function Admin() {
                   onSubmit={(e) => {
                     e.preventDefault();
                     if (!matchForm.team1 || !matchForm.team2 || !matchForm.matchDate) return;
-                    // Treat datetime-local input as IST by appending +05:30 before converting
-                    const matchDateIST = matchForm.matchDate + ":00+05:30";
-                    createMatch.mutate({ data: { ...matchForm, matchDate: matchDateIST } });
+                    // Treat datetime-local input as ET (UTC-4 / EDT) so server stores correct UTC
+                    const matchDateET = matchForm.matchDate + ":00-04:00";
+                    createMatch.mutate({ data: { ...matchForm, matchDate: matchDateET } });
                   }}
                 >
                   <div>
@@ -267,7 +267,7 @@ export default function Admin() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-muted-foreground mb-1">Match Date & Time <span className="text-xs text-primary/70">(enter in IST)</span></label>
+                    <label className="block text-sm font-medium text-muted-foreground mb-1">Match Date & Time <span className="text-xs text-primary/70">(enter in ET)</span></label>
                     <input 
                       type="datetime-local" required
                       value={matchForm.matchDate} onChange={e => setMatchForm({...matchForm, matchDate: e.target.value})}
@@ -290,7 +290,7 @@ export default function Admin() {
               <div key={match.id} className="bg-card border border-white/5 rounded-2xl p-6 relative">
                 <div className="flex justify-between items-start mb-4">
                   <span className="text-xs font-bold text-muted-foreground bg-secondary px-2 py-1 rounded">
-                    {new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true }).format(new Date(match.matchDate))} IST
+                    {new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true }).format(new Date(match.matchDate))} ET
                   </span>
                   <div className="flex items-center gap-2">
                     <button
