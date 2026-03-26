@@ -155,8 +155,10 @@ export default function MyBets() {
             const isLost = bet.status === 'lost';
             const isPending = bet.status === 'pending';
             const isLive = match.status === 'live';
-            const matchStarted = new Date() >= new Date(match.matchDate);
-            const isEditable = !matchStarted && match.status === 'upcoming';
+            const isFinished = match.status === 'finished';
+            const matchTimeUp = new Date() >= new Date(match.matchDate);
+            const isEditable = !matchTimeUp && match.status === 'upcoming';
+            const isLocked = !isEditable;
 
             return (
               <div
@@ -164,7 +166,7 @@ export default function MyBets() {
                 className={`relative overflow-hidden flex flex-col md:flex-row items-start md:items-center justify-between p-6 rounded-2xl border transition-all ${
                   isWon ? 'bg-green-500/5 border-green-500/20 shadow-[0_0_30px_-10px_rgba(34,197,94,0.1)]' :
                   isLost ? 'bg-red-500/5 border-red-500/20' :
-                  isLive ? 'bg-orange-500/5 border-orange-500/20' :
+                  isLocked && !isFinished ? 'bg-red-500/5 border-red-500/20' :
                   'bg-card border-white/10'
                 }`}
               >
@@ -186,8 +188,8 @@ export default function MyBets() {
                         Editable
                       </span>
                     )}
-                    {matchStarted && (
-                      <span className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-white/5 text-white/40">
+                    {isLocked && !isFinished && (
+                      <span className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-red-500/15 text-red-400">
                         <Lock className="h-2.5 w-2.5" /> Betting Locked
                       </span>
                     )}
