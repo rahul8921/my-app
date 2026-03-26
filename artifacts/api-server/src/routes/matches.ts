@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { db, matchesTable, betsTable } from "@workspace/db";
+import { db, matchesTable, betsTable, usersTable } from "@workspace/db";
 import { eq, sum, and } from "drizzle-orm";
 import {
   CreateMatchBody,
@@ -40,17 +40,23 @@ router.get("/matches", async (req: Request, res: Response) => {
 
   const result = await Promise.all(
     matches.map(async (match) => {
-      const bets = await db
-        .select()
+      const betsWithUsers = await db
+        .select({
+          team: betsTable.team,
+          amount: betsTable.amount,
+          username: usersTable.username,
+          profileImageUrl: usersTable.profileImageUrl,
+        })
         .from(betsTable)
+        .innerJoin(usersTable, eq(betsTable.userId, usersTable.id))
         .where(eq(betsTable.matchId, match.id));
 
       let totalBetsTeam1 = 0;
       let totalBetsTeam2 = 0;
-      for (const bet of bets) {
-        const amt = parseFloat(bet.amount as string);
-        if (bet.team === match.team1) totalBetsTeam1 += amt;
-        else if (bet.team === match.team2) totalBetsTeam2 += amt;
+      for (const b of betsWithUsers) {
+        const amt = parseFloat(b.amount as string);
+        if (b.team === match.team1) totalBetsTeam1 += amt;
+        else if (b.team === match.team2) totalBetsTeam2 += amt;
       }
 
       return {
@@ -63,6 +69,12 @@ router.get("/matches", async (req: Request, res: Response) => {
         score: match.score ?? null,
         totalBetsTeam1,
         totalBetsTeam2,
+        bets: betsWithUsers.map(b => ({
+          username: b.username ?? "Unknown",
+          profileImage: b.profileImageUrl ?? null,
+          team: b.team,
+          amount: parseFloat(b.amount as string),
+        })),
         createdAt: match.createdAt.toISOString(),
       };
     }),

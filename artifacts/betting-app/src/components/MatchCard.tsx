@@ -1,11 +1,31 @@
 import { useState } from "react";
-import { Coins, Pencil, Trash2, LogIn, Clock } from "lucide-react";
+import { Coins, Pencil, Trash2, LogIn, Clock, Users } from "lucide-react";
 import { Match, Bet } from "@workspace/api-client-react/src/generated/api.schemas";
 import { usePlaceBet } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { formatCurrency } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@workspace/replit-auth-web";
+
+type MatchBet = { username: string; profileImage?: string | null; team: string; amount: number };
+type MatchWithBets = Match & { bets?: MatchBet[] };
+
+const TEAM_COLORS: Record<string, { bg: string; border: string; text: string; glow: string }> = {
+  CSK:  { bg: '#1a1400', border: '#FFCB05', text: '#FFCB05', glow: '#FFCB0540' },
+  MI:   { bg: '#00122b', border: '#004BA0', text: '#60a5fa', glow: '#004BA040' },
+  RCB:  { bg: '#1a0002', border: '#E31B23', text: '#f87171', glow: '#E31B2340' },
+  KKR:  { bg: '#0e001a', border: '#5B2D8E', text: '#c084fc', glow: '#5B2D8E40' },
+  SRH:  { bg: '#1a0800', border: '#F7631B', text: '#fb923c', glow: '#F7631B40' },
+  DC:   { bg: '#00101a', border: '#0078BC', text: '#38bdf8', glow: '#0078BC40' },
+  PBKS: { bg: '#1a0000', border: '#C8102E', text: '#f87171', glow: '#C8102E40' },
+  RR:   { bg: '#1a0010', border: '#EA1A85', text: '#f472b6', glow: '#EA1A8540' },
+  GT:   { bg: '#001414', border: '#1C8068', text: '#2dd4bf', glow: '#1C806840' },
+  LSG:  { bg: '#001020', border: '#41B6E6', text: '#7dd3fc', glow: '#41B6E640' },
+};
+
+function getTeamColor(team: string) {
+  return TEAM_COLORS[team.toUpperCase()] ?? { bg: '#1a1a2e', border: '#6366f1', text: '#a5b4fc', glow: '#6366f140' };
+}
 import {
   Dialog,
   DialogContent,
@@ -30,7 +50,7 @@ function formatMatchDate(dateStr: string) {
 }
 
 interface MatchCardProps {
-  match: Match;
+  match: MatchWithBets;
   userBet?: Bet | null;
   isApproved: boolean;
 }
@@ -42,6 +62,7 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
   const [betTeam, setBetTeam] = useState<string | null>(null);
   const [betAmount, setBetAmount] = useState<string>("");
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [hoveredTeam, setHoveredTeam] = useState<string | null>(null);
 
   // Edit state
   const [editOpen, setEditOpen] = useState(false);
@@ -169,42 +190,124 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
       <div className="relative flex-1 p-6 flex flex-col gap-6">
         <div className="flex justify-between items-center w-full">
           {/* Team 1 */}
-          <div className="flex flex-col items-center flex-1 gap-2">
-            <div className="relative h-16 w-16 rounded-full bg-secondary border border-white/10 flex items-center justify-center text-xl font-bold text-white shadow-inner">
-              {match.team1.substring(0, 3).toUpperCase()}
-              {isFinished && match.winner === match.team1 && (
-                <div className="absolute -top-3 -right-3 text-2xl drop-shadow-[0_0_8px_rgba(245,158,11,0.8)]">👑</div>
-              )}
-              {isFinished && match.winner && match.winner !== match.team1 && (
-                <div className="absolute -top-2 -right-2 text-xl opacity-50">💀</div>
-              )}
-            </div>
-            <span className="font-display font-semibold text-lg text-center leading-tight">{match.team1}</span>
-            <div className="flex items-center gap-1 text-sm text-primary font-medium bg-primary/10 px-2 py-1 rounded-md">
-              {team1Pct}% Odds
-            </div>
-          </div>
+          {(() => {
+            const c1 = getTeamColor(match.team1);
+            const team1Bets = (match.bets ?? []).filter(b => b.team === match.team1);
+            return (
+              <div
+                className="flex flex-col items-center flex-1 gap-2 relative cursor-default"
+                onMouseEnter={() => setHoveredTeam(match.team1)}
+                onMouseLeave={() => setHoveredTeam(null)}
+              >
+                <div
+                  className="relative h-16 w-16 rounded-full border-2 flex items-center justify-center text-base font-black shadow-inner transition-transform duration-200 hover:scale-110"
+                  style={{ backgroundColor: c1.bg, borderColor: c1.border, color: c1.text, boxShadow: `0 0 16px ${c1.glow}` }}
+                >
+                  {match.team1.substring(0, 3).toUpperCase()}
+                  {isFinished && match.winner === match.team1 && (
+                    <div className="absolute -top-3 -right-3 text-2xl drop-shadow-[0_0_8px_rgba(245,158,11,0.8)]">👑</div>
+                  )}
+                  {isFinished && match.winner && match.winner !== match.team1 && (
+                    <div className="absolute -top-2 -right-2 text-xl opacity-50">💀</div>
+                  )}
+                </div>
+                <span className="font-display font-semibold text-lg text-center leading-tight" style={{ color: c1.text }}>{match.team1}</span>
+                <div className="flex items-center gap-1 text-sm font-medium px-2 py-1 rounded-md" style={{ color: c1.text, backgroundColor: `${c1.border}20` }}>
+                  {team1Pct}% Odds
+                </div>
+                {/* Hover bettor popup */}
+                {hoveredTeam === match.team1 && (
+                  <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-50 w-52 bg-card border border-white/10 rounded-xl shadow-2xl p-3 pointer-events-none">
+                    <div className="flex items-center gap-1.5 mb-2">
+                      <Users className="h-3 w-3" style={{ color: c1.text }} />
+                      <span className="text-xs font-bold uppercase tracking-wide" style={{ color: c1.text }}>{match.team1} backers</span>
+                    </div>
+                    {team1Bets.length === 0 ? (
+                      <p className="text-xs text-muted-foreground italic">No bets yet</p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {team1Bets.map((b, i) => (
+                          <div key={i} className="flex items-center gap-2">
+                            {b.profileImage ? (
+                              <img src={b.profileImage} className="h-5 w-5 rounded-full object-cover" alt={b.username} />
+                            ) : (
+                              <div className="h-5 w-5 rounded-full bg-secondary flex items-center justify-center text-[10px] font-bold text-white">
+                                {b.username[0]?.toUpperCase()}
+                              </div>
+                            )}
+                            <span className="text-xs text-white flex-1 truncate">{b.username}</span>
+                            <span className="text-xs font-bold" style={{ color: c1.text }}>{formatCurrency(b.amount)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           <div className="flex flex-col items-center justify-center px-4">
             <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-1">VS</span>
           </div>
 
           {/* Team 2 */}
-          <div className="flex flex-col items-center flex-1 gap-2">
-            <div className="relative h-16 w-16 rounded-full bg-secondary border border-white/10 flex items-center justify-center text-xl font-bold text-white shadow-inner">
-              {match.team2.substring(0, 3).toUpperCase()}
-              {isFinished && match.winner === match.team2 && (
-                <div className="absolute -top-3 -right-3 text-2xl drop-shadow-[0_0_8px_rgba(245,158,11,0.8)]">👑</div>
-              )}
-              {isFinished && match.winner && match.winner !== match.team2 && (
-                <div className="absolute -top-2 -right-2 text-xl opacity-50">💀</div>
-              )}
-            </div>
-            <span className="font-display font-semibold text-lg text-center leading-tight">{match.team2}</span>
-            <div className="flex items-center gap-1 text-sm text-primary font-medium bg-primary/10 px-2 py-1 rounded-md">
-              {team2Pct}% Odds
-            </div>
-          </div>
+          {(() => {
+            const c2 = getTeamColor(match.team2);
+            const team2Bets = (match.bets ?? []).filter(b => b.team === match.team2);
+            return (
+              <div
+                className="flex flex-col items-center flex-1 gap-2 relative cursor-default"
+                onMouseEnter={() => setHoveredTeam(match.team2)}
+                onMouseLeave={() => setHoveredTeam(null)}
+              >
+                <div
+                  className="relative h-16 w-16 rounded-full border-2 flex items-center justify-center text-base font-black shadow-inner transition-transform duration-200 hover:scale-110"
+                  style={{ backgroundColor: c2.bg, borderColor: c2.border, color: c2.text, boxShadow: `0 0 16px ${c2.glow}` }}
+                >
+                  {match.team2.substring(0, 3).toUpperCase()}
+                  {isFinished && match.winner === match.team2 && (
+                    <div className="absolute -top-3 -right-3 text-2xl drop-shadow-[0_0_8px_rgba(245,158,11,0.8)]">👑</div>
+                  )}
+                  {isFinished && match.winner && match.winner !== match.team2 && (
+                    <div className="absolute -top-2 -right-2 text-xl opacity-50">💀</div>
+                  )}
+                </div>
+                <span className="font-display font-semibold text-lg text-center leading-tight" style={{ color: c2.text }}>{match.team2}</span>
+                <div className="flex items-center gap-1 text-sm font-medium px-2 py-1 rounded-md" style={{ color: c2.text, backgroundColor: `${c2.border}20` }}>
+                  {team2Pct}% Odds
+                </div>
+                {/* Hover bettor popup */}
+                {hoveredTeam === match.team2 && (
+                  <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-50 w-52 bg-card border border-white/10 rounded-xl shadow-2xl p-3 pointer-events-none">
+                    <div className="flex items-center gap-1.5 mb-2">
+                      <Users className="h-3 w-3" style={{ color: c2.text }} />
+                      <span className="text-xs font-bold uppercase tracking-wide" style={{ color: c2.text }}>{match.team2} backers</span>
+                    </div>
+                    {team2Bets.length === 0 ? (
+                      <p className="text-xs text-muted-foreground italic">No bets yet</p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {team2Bets.map((b, i) => (
+                          <div key={i} className="flex items-center gap-2">
+                            {b.profileImage ? (
+                              <img src={b.profileImage} className="h-5 w-5 rounded-full object-cover" alt={b.username} />
+                            ) : (
+                              <div className="h-5 w-5 rounded-full bg-secondary flex items-center justify-center text-[10px] font-bold text-white">
+                                {b.username[0]?.toUpperCase()}
+                              </div>
+                            )}
+                            <span className="text-xs text-white flex-1 truncate">{b.username}</span>
+                            <span className="text-xs font-bold" style={{ color: c2.text }}>{formatCurrency(b.amount)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
 
         {/* Live Score */}
