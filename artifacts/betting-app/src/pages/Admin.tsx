@@ -15,7 +15,7 @@ import { formatCurrency } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { 
-  Users, UserCheck, Trophy, Activity, TrendingUp, CheckCircle, XCircle, Download, RefreshCw
+  Users, UserCheck, Trophy, Activity, TrendingUp, CheckCircle, XCircle, Download, RefreshCw, Pencil, Clock
 } from "lucide-react";
 import {
   Dialog,
@@ -78,8 +78,50 @@ export default function Admin() {
   const [createMatchOpen, setCreateMatchOpen] = useState(false);
   const [matchForm, setMatchForm] = useState({ team1: "", team2: "", matchDate: "" });
   const [importing, setImporting] = useState(false);
+  const [fixingTimes, setFixingTimes] = useState(false);
+  const [editMatchId, setEditMatchId] = useState<number | null>(null);
+  const [editMatchDate, setEditMatchDate] = useState("");
 
   const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+
+  async function handleFixAllTimes() {
+    setFixingTimes(true);
+    try {
+      const res = await fetch(`${BASE}/api/admin/fix-match-times`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Fix failed");
+      queryClient.invalidateQueries({ queryKey: ['/api/matches'] });
+      toast({ title: `Fixed ${data.fixed} match time(s)`, description: "All matches now show 10:00 AM ET" });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Fix failed", description: err.message });
+    } finally {
+      setFixingTimes(false);
+    }
+  }
+
+  async function handleEditMatchTime() {
+    if (!editMatchId || !editMatchDate) return;
+    const matchDateET = editMatchDate + ":00-04:00";
+    try {
+      const res = await fetch(`${BASE}/api/matches/${editMatchId}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ matchDate: matchDateET }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Update failed");
+      queryClient.invalidateQueries({ queryKey: ['/api/matches'] });
+      toast({ title: "Match time updated" });
+      setEditMatchId(null);
+      setEditMatchDate("");
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Update failed", description: err.message });
+    }
+  }
 
   async function handleImportMatches() {
     setImporting(true);
@@ -219,16 +261,29 @@ export default function Admin() {
 
         <TabsContent value="matches">
           <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
-            <button
-              onClick={handleImportMatches}
-              disabled={importing}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg transition-all flex items-center gap-2 disabled:opacity-60"
-            >
-              {importing
-                ? <><RefreshCw className="h-4 w-4 animate-spin" /> Importing…</>
-                : <><Download className="h-4 w-4" /> Load from CricAPI</>
-              }
-            </button>
+            <div className="flex items-center gap-3 flex-wrap">
+              <button
+                onClick={handleImportMatches}
+                disabled={importing}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg transition-all flex items-center gap-2 disabled:opacity-60"
+              >
+                {importing
+                  ? <><RefreshCw className="h-4 w-4 animate-spin" /> Importing…</>
+                  : <><Download className="h-4 w-4" /> Load from CricAPI</>
+                }
+              </button>
+              <button
+                onClick={handleFixAllTimes}
+                disabled={fixingTimes}
+                title="Shift all 6 AM ET matches to 10 AM ET"
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-lg transition-all flex items-center gap-2 disabled:opacity-60"
+              >
+                {fixingTimes
+                  ? <><RefreshCw className="h-4 w-4 animate-spin" /> Fixing…</>
+                  : <><Clock className="h-4 w-4" /> Fix All Times</>
+                }
+              </button>
+            </div>
 
             <Dialog open={createMatchOpen} onOpenChange={setCreateMatchOpen}>
               <DialogTrigger asChild>
@@ -289,9 +344,21 @@ export default function Admin() {
             {activeMatches.map(match => (
               <div key={match.id} className="bg-card border border-white/5 rounded-2xl p-6 relative">
                 <div className="flex justify-between items-start mb-4">
-                  <span className="text-xs font-bold text-muted-foreground bg-secondary px-2 py-1 rounded">
+                  <button
+                    onClick={() => {
+                      const d = new Date(match.matchDate);
+                      const offsetMs = -4 * 60 * 60 * 1000;
+                      const etDate = new Date(d.getTime() + offsetMs);
+                      const etStr = etDate.toISOString().slice(0, 16);
+                      setEditMatchId(match.id);
+                      setEditMatchDate(etStr);
+                    }}
+                    className="flex items-center gap-1 text-xs font-bold text-muted-foreground bg-secondary px-2 py-1 rounded hover:text-amber-400 transition-colors"
+                    title="Click to edit time"
+                  >
+                    <Pencil className="h-3 w-3" />
                     {new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true }).format(new Date(match.matchDate))} ET
-                  </span>
+                  </button>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => setMatchResult.mutate({
@@ -337,6 +404,32 @@ export default function Admin() {
           </div>
         </TabsContent>
       </Tabs>
+
+      {/* Edit Match Time Dialog */}
+      <Dialog open={editMatchId !== null} onOpenChange={(open) => { if (!open) { setEditMatchId(null); setEditMatchDate(""); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Match Time</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-1">New Date & Time <span className="text-xs text-primary/70">(enter in ET)</span></label>
+              <input
+                type="datetime-local"
+                value={editMatchDate}
+                onChange={e => setEditMatchDate(e.target.value)}
+                className="w-full px-4 py-2 rounded-lg bg-background border border-white/10 text-white focus:outline-none focus:border-primary"
+              />
+            </div>
+            <button
+              onClick={handleEditMatchTime}
+              className="w-full py-3 bg-primary text-primary-foreground font-bold rounded-xl"
+            >
+              Save Time
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

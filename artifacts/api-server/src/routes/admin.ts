@@ -225,6 +225,31 @@ router.get("/admin/stats", async (req: Request, res: Response) => {
   });
 });
 
+router.post("/admin/fix-match-times", async (req: Request, res: Response) => {
+  if (!isAdmin(req, res)) return;
+
+  try {
+    // Find all matches where UTC hour < 12 (i.e. before noon UTC = before 10 AM ET at EDT UTC-4)
+    const allMatches = await db.select().from(matchesTable);
+    let fixed = 0;
+    for (const match of allMatches) {
+      const utcHour = match.matchDate.getUTCHours();
+      if (utcHour < 12) {
+        // Shift to 14:00 UTC (= 10:00 AM ET during EDT)
+        const corrected = new Date(match.matchDate);
+        corrected.setUTCHours(14, 0, 0, 0);
+        await db.update(matchesTable)
+          .set({ matchDate: corrected, updatedAt: new Date() })
+          .where(eq(matchesTable.id, match.id));
+        fixed++;
+      }
+    }
+    res.json({ fixed, message: `${fixed} match time(s) corrected to 10:00 AM ET` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message ?? "Failed to fix match times" });
+  }
+});
+
 router.post("/admin/import-matches", async (req: Request, res: Response) => {
   if (!isAdmin(req, res)) return;
 

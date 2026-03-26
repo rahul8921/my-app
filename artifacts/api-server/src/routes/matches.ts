@@ -170,6 +170,62 @@ router.post("/matches", async (req: Request, res: Response) => {
   });
 });
 
+router.patch("/matches/:matchId", async (req: Request, res: Response) => {
+  if (!req.isAuthenticated()) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  if (!req.user.isAdmin) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  const matchId = parseInt(req.params.matchId);
+  if (isNaN(matchId)) {
+    res.status(400).json({ error: "Invalid match id" });
+    return;
+  }
+
+  const { team1, team2, matchDate } = req.body as {
+    team1?: string;
+    team2?: string;
+    matchDate?: string;
+  };
+
+  const updates: Record<string, unknown> = { updatedAt: new Date() };
+  if (team1) updates.team1 = team1;
+  if (team2) updates.team2 = team2;
+  if (matchDate) {
+    const parsed = new Date(matchDate);
+    if (isNaN(parsed.getTime())) {
+      res.status(400).json({ error: "Invalid matchDate format" });
+      return;
+    }
+    updates.matchDate = parsed;
+  }
+
+  const [updated] = await db
+    .update(matchesTable)
+    .set(updates as never)
+    .where(eq(matchesTable.id, matchId))
+    .returning();
+
+  if (!updated) {
+    res.status(404).json({ error: "Match not found" });
+    return;
+  }
+
+  res.json({
+    id: updated.id,
+    team1: updated.team1,
+    team2: updated.team2,
+    matchDate: updated.matchDate.toISOString(),
+    status: updated.status,
+    winner: updated.winner,
+    createdAt: updated.createdAt.toISOString(),
+  });
+});
+
 router.patch("/matches/:matchId/result", async (req: Request, res: Response) => {
   if (!req.isAuthenticated()) {
     res.status(401).json({ error: "Unauthorized" });
