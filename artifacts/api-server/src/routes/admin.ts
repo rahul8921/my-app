@@ -3,6 +3,50 @@ import { db, usersTable, betsTable, matchesTable } from "@workspace/db";
 import { eq, sum, count } from "drizzle-orm";
 import { ApproveUserParams, RejectUserParams } from "@workspace/api-zod";
 
+const CRICAPI_BASE = "https://api.cricapi.com/v1";
+
+const IPL_KEYWORDS: Record<string, string[]> = {
+  RCB:  ["royal challengers", "rcb", "bengaluru", "bangalore"],
+  SRH:  ["sunrisers", "srh", "hyderabad"],
+  MI:   ["mumbai indians", "mumbai", " mi "],
+  CSK:  ["chennai super kings", "chennai", "csk"],
+  KKR:  ["kolkata knight riders", "kolkata", "kkr"],
+  PBKS: ["punjab kings", "punjab", "pbks", "kings xi"],
+  RR:   ["rajasthan royals", "rajasthan", " rr "],
+  DC:   ["delhi capitals", "delhi", " dc "],
+  GT:   ["gujarat titans", "gujarat", " gt "],
+  LSG:  ["lucknow super giants", "lucknow", "lsg"],
+};
+
+function resolveIplKey(name: string): string | null {
+  const lower = ` ${name.toLowerCase()} `;
+  for (const [key, keywords] of Object.entries(IPL_KEYWORDS)) {
+    if (keywords.some(k => lower.includes(k))) return key;
+  }
+  return null;
+}
+
+function isIplTeam(name: string): boolean {
+  return resolveIplKey(name) !== null;
+}
+
+function toShortName(fullName: string): string {
+  const key = resolveIplKey(fullName);
+  return key ?? fullName;
+}
+
+interface CricApiMatchItem {
+  id: string;
+  name: string;
+  matchType: string;
+  status: string;
+  date: string;
+  dateTimeGMT: string;
+  teams: string[];
+  matchStarted?: boolean;
+  matchEnded?: boolean;
+}
+
 const router: IRouter = Router();
 
 function isAdmin(req: Request, res: Response): boolean {
@@ -184,6 +228,90 @@ router.get("/admin/stats", async (req: Request, res: Response) => {
     totalMatches,
     activeMatches,
   });
+});
+
+router.post("/admin/import-matches", async (req: Request, res: Response) => {
+  if (!isAdmin(req, res)) return;
+
+  const apiKey = process.env["CRICAPI_KEY"];
+  if (!apiKey) {
+    res.status(503).json({ error: "CRICAPI_KEY not configured on server" });
+    return;
+  }
+
+  try {
+    // Fetch all upcoming/current matches from CricAPI
+    let allApiMatches: CricApiMatchItem[] = [];
+    // Paginate up to 2 pages (offset 0 and 25) to get a broad list
+    for (const offset of [0, 25]) {
+      const url = `${CRICAPI_BASE}/matches?apikey=${apiKey}&offset=${offset}`;
+      const resp = await fetch(url);
+      if (!resp.ok) break;
+      const data = await resp.json() as { status: string; data?: CricApiMatchItem[] };
+      if (data.status !== "success" || !data.data?.length) break;
+      allApiMatches = allApiMatches.concat(data.data);
+    }
+
+    // Filter: upcoming T20 IPL matches that haven't started
+    const now = new Date();
+    const iplMatches = allApiMatches.filter(m => {
+      if (m.matchStarted || m.matchEnded) return false;
+      if (!m.teams || m.teams.length < 2) return false;
+      const matchDate = new Date(m.dateTimeGMT || m.date);
+      if (matchDate <= now) return false;
+      // At least one team must be an IPL team
+      return isIplTeam(m.teams[0]) || isIplTeam(m.teams[1]);
+    });
+
+    // Load existing DB matches to deduplicate
+    const existingMatches = await db.select().from(matchesTable);
+
+    const imported: typeof matchesTable.$inferSelect[] = [];
+    const skipped: string[] = [];
+
+    for (const apiMatch of iplMatches) {
+      const team1 = toShortName(apiMatch.teams[0]);
+      const team2 = toShortName(apiMatch.teams[1]);
+      const matchDate = new Date(apiMatch.dateTimeGMT || apiMatch.date);
+
+      // Deduplicate: skip if we already have a match with same teams on same day
+      const alreadyExists = existingMatches.some(ex => {
+        const exDate = new Date(ex.matchDate);
+        const sameDay = Math.abs(exDate.getTime() - matchDate.getTime()) < 24 * 60 * 60 * 1000;
+        const sameTeams =
+          (ex.team1 === team1 && ex.team2 === team2) ||
+          (ex.team1 === team2 && ex.team2 === team1);
+        return sameDay && sameTeams;
+      });
+
+      if (alreadyExists) {
+        skipped.push(`${team1} vs ${team2}`);
+        continue;
+      }
+
+      const [inserted] = await db
+        .insert(matchesTable)
+        .values({ team1, team2, matchDate })
+        .returning();
+
+      imported.push(inserted);
+      existingMatches.push(inserted); // prevent double-insert within same call
+    }
+
+    res.json({
+      imported: imported.length,
+      skipped: skipped.length,
+      matches: imported.map(m => ({
+        id: m.id,
+        team1: m.team1,
+        team2: m.team2,
+        matchDate: m.matchDate.toISOString(),
+        status: m.status,
+      })),
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message ?? "Failed to import matches" });
+  }
 });
 
 export default router;

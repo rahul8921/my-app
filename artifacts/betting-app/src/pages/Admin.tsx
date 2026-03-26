@@ -15,7 +15,7 @@ import { formatCurrency } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { 
-  Users, UserCheck, Trophy, Activity, TrendingUp, CheckCircle, XCircle 
+  Users, UserCheck, Trophy, Activity, TrendingUp, CheckCircle, XCircle, Download, RefreshCw
 } from "lucide-react";
 import {
   Dialog,
@@ -77,6 +77,35 @@ export default function Admin() {
 
   const [createMatchOpen, setCreateMatchOpen] = useState(false);
   const [matchForm, setMatchForm] = useState({ team1: "", team2: "", matchDate: "" });
+  const [importing, setImporting] = useState(false);
+
+  const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+
+  async function handleImportMatches() {
+    setImporting(true);
+    try {
+      const res = await fetch(`${BASE}/api/admin/import-matches`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Import failed");
+      queryClient.invalidateQueries({ queryKey: ['/api/matches'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] });
+      if (data.imported === 0) {
+        toast({ title: "No new matches found", description: `${data.skipped} already in your schedule.` });
+      } else {
+        toast({
+          title: `Imported ${data.imported} match${data.imported !== 1 ? "es" : ""}`,
+          description: data.skipped > 0 ? `${data.skipped} duplicate(s) skipped.` : "All matches added successfully.",
+        });
+      }
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Import failed", description: err.message });
+    } finally {
+      setImporting(false);
+    }
+  }
 
   if (!user?.isAdmin) {
     return <div className="p-8 text-center text-red-500">Access Denied</div>;
@@ -189,7 +218,18 @@ export default function Admin() {
         </TabsContent>
 
         <TabsContent value="matches">
-          <div className="flex justify-end mb-4">
+          <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
+            <button
+              onClick={handleImportMatches}
+              disabled={importing}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg transition-all flex items-center gap-2 disabled:opacity-60"
+            >
+              {importing
+                ? <><RefreshCw className="h-4 w-4 animate-spin" /> Importing…</>
+                : <><Download className="h-4 w-4" /> Load from CricAPI</>
+              }
+            </button>
+
             <Dialog open={createMatchOpen} onOpenChange={setCreateMatchOpen}>
               <DialogTrigger asChild>
                 <button className="px-4 py-2 bg-primary text-primary-foreground font-bold rounded-lg hover:shadow-lg shadow-primary/20 transition-all flex items-center gap-2">
