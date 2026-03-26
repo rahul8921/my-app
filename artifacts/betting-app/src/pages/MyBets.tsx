@@ -154,8 +154,9 @@ export default function MyBets() {
             const isWon = bet.status === 'won';
             const isLost = bet.status === 'lost';
             const isPending = bet.status === 'pending';
-            const isUpcoming = match.status === 'upcoming';
             const isLive = match.status === 'live';
+            const matchStarted = new Date() >= new Date(match.matchDate);
+            const isEditable = !matchStarted && match.status !== 'finished';
 
             return (
               <div
@@ -180,14 +181,14 @@ export default function MyBets() {
                     }`}>
                       {match.status}
                     </span>
-                    {isUpcoming && (
+                    {isEditable && (
                       <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-primary/20 text-primary">
                         Editable
                       </span>
                     )}
-                    {(isLive || match.status === 'finished') && (
+                    {matchStarted && (
                       <span className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-white/5 text-white/40">
-                        <Lock className="h-2.5 w-2.5" /> Locked
+                        <Lock className="h-2.5 w-2.5" /> Betting Locked
                       </span>
                     )}
                   </div>
@@ -226,8 +227,8 @@ export default function MyBets() {
                     </div>
                   </div>
 
-                  {/* Edit / Cancel — only for upcoming */}
-                  {isUpcoming && (
+                  {/* Edit / Cancel — only before match time */}
+                  {isEditable && (
                     <div className="flex items-center gap-2 flex-shrink-0">
                       <button
                         onClick={() => openEdit(bet)}
