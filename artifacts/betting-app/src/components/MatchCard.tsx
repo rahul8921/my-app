@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { format } from "date-fns";
-import { Coins, Crown, Skull } from "lucide-react";
+import { Coins, Pencil, Trash2 } from "lucide-react";
 import { Match, Bet } from "@workspace/api-client-react/src/generated/api.schemas";
 import { usePlaceBet } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -15,6 +15,8 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+
 interface MatchCardProps {
   match: Match;
   userBet?: Bet | null;
@@ -28,15 +30,23 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
   const [betAmount, setBetAmount] = useState<string>("");
   const [dialogOpen, setDialogOpen] = useState(false);
 
+  // Edit state
+  const [editOpen, setEditOpen] = useState(false);
+  const [editTeam, setEditTeam] = useState<string>("");
+  const [editAmount, setEditAmount] = useState<string>("");
+  const [saving, setSaving] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+
   const placeBet = usePlaceBet({
     mutation: {
       onSuccess: () => {
         toast({
-          title: "Bet placed successfully!",
+          title: "Bet placed!",
           description: `You bet ${formatCurrency(Number(betAmount))} on ${betTeam}`,
         });
         setDialogOpen(false);
         setBetAmount("");
+        setBetTeam(null);
         queryClient.invalidateQueries({ queryKey: ['/api/matches'] });
         queryClient.invalidateQueries({ queryKey: ['/api/bets'] });
       },
@@ -51,36 +61,86 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
   });
 
   const totalPool = match.totalBetsTeam1 + match.totalBetsTeam2;
-  
-  // Calculate odds: If pool is 0, defaults to 50/50
   const team1Pct = totalPool === 0 ? 50 : Math.round((match.totalBetsTeam1 / totalPool) * 100);
   const team2Pct = totalPool === 0 ? 50 : Math.round((match.totalBetsTeam2 / totalPool) * 100);
 
   const isFinished = match.status === 'finished';
-  const canBet = (match.status === 'upcoming' || match.status === 'live') && isApproved && !userBet;
+  const matchTimeUp = new Date() >= new Date(match.matchDate);
+  const canBet = match.status === 'upcoming' && !matchTimeUp && isApproved && !userBet;
+  const canEdit = !!userBet && match.status === 'upcoming' && !matchTimeUp && isApproved;
 
   const handleBetSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!betTeam || !betAmount || Number(betAmount) < 1) return;
-    
-    placeBet.mutate({
-      data: {
-        matchId: match.id,
-        team: betTeam,
-        amount: Number(betAmount)
-      }
-    });
+    placeBet.mutate({ data: { matchId: match.id, team: betTeam, amount: Number(betAmount) } });
   };
+
+  async function handleEditSave(e: React.FormEvent) {
+    e.preventDefault();
+    if (!userBet) return;
+    setSaving(true);
+    try {
+      const payload: { amount?: number; team?: string } = {};
+      const amt = parseFloat(editAmount);
+      if (!isNaN(amt) && amt > 0 && amt !== userBet.amount) payload.amount = amt;
+      if (editTeam && editTeam !== userBet.team) payload.team = editTeam;
+      if (!payload.amount && !payload.team) {
+        toast({ title: "No changes made" });
+        setEditOpen(false);
+        return;
+      }
+      const res = await fetch(`${BASE}/api/bets/${userBet.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to update bet");
+      }
+      toast({ title: "Bet updated!" });
+      setEditOpen(false);
+      queryClient.invalidateQueries({ queryKey: ['/api/matches'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/bets'] });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Error", description: err.message });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleCancel() {
+    if (!userBet) return;
+    setCancelling(true);
+    try {
+      const res = await fetch(`${BASE}/api/bets/${userBet.id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to cancel bet");
+      }
+      toast({ title: "Bet cancelled" });
+      queryClient.invalidateQueries({ queryKey: ['/api/matches'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/bets'] });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Error", description: err.message });
+    } finally {
+      setCancelling(false);
+    }
+  }
 
   return (
     <div className="group relative overflow-hidden rounded-2xl bg-card border border-white/5 shadow-lg transition-all duration-300 hover:border-white/10 hover:shadow-xl hover:shadow-primary/5 flex flex-col">
       <div className="absolute inset-0 bg-gradient-to-b from-white/[0.02] to-transparent pointer-events-none" />
-      
+
       {/* Header */}
       <div className="relative px-6 py-4 flex items-center justify-between border-b border-white/5">
         <div className="flex items-center gap-2">
           <div className={`h-2 w-2 rounded-full ${
-            match.status === 'live' ? 'bg-red-500 animate-pulse' : 
+            match.status === 'live' ? 'bg-red-500 animate-pulse' :
             match.status === 'upcoming' ? 'bg-blue-400' : 'bg-gray-500'
           }`} />
           <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
@@ -106,9 +166,7 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
                 <div className="absolute -top-2 -right-2 text-xl opacity-50">💀</div>
               )}
             </div>
-            <span className="font-display font-semibold text-lg text-center leading-tight">
-              {match.team1}
-            </span>
+            <span className="font-display font-semibold text-lg text-center leading-tight">{match.team1}</span>
             <div className="flex items-center gap-1 text-sm text-primary font-medium bg-primary/10 px-2 py-1 rounded-md">
               {team1Pct}% Odds
             </div>
@@ -129,9 +187,7 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
                 <div className="absolute -top-2 -right-2 text-xl opacity-50">💀</div>
               )}
             </div>
-            <span className="font-display font-semibold text-lg text-center leading-tight">
-              {match.team2}
-            </span>
+            <span className="font-display font-semibold text-lg text-center leading-tight">{match.team2}</span>
             <div className="flex items-center gap-1 text-sm text-primary font-medium bg-primary/10 px-2 py-1 rounded-md">
               {team2Pct}% Odds
             </div>
@@ -153,25 +209,53 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
 
         {/* Existing Bet Info */}
         {userBet && (
-          <div className={`p-4 rounded-xl border ${
-            userBet.status === 'won' ? 'bg-green-500/10 border-green-500/30' : 
-            userBet.status === 'lost' ? 'bg-red-500/10 border-red-500/30' : 
+          <div className={`rounded-xl border ${
+            userBet.status === 'won' ? 'bg-green-500/10 border-green-500/30' :
+            userBet.status === 'lost' ? 'bg-red-500/10 border-red-500/30' :
             'bg-primary/10 border-primary/30'
           }`}>
-            <p className="text-sm text-center font-medium">
-              You bet <span className="font-bold text-white">{formatCurrency(userBet.amount)}</span> on <span className="font-bold text-white">{userBet.team}</span>
-            </p>
-            {userBet.payout ? (
-              <p className={`text-center font-bold mt-1 ${userBet.status === 'won' ? 'text-green-400' : 'text-red-400'}`}>
-                {userBet.status === 'won' ? `Won ${formatCurrency(userBet.payout)}!` : 'Lost'}
+            <div className="p-4">
+              <p className="text-sm text-center font-medium">
+                Your bet: <span className="font-bold text-white">{formatCurrency(userBet.amount)}</span> on{" "}
+                <span className="font-bold text-white">{userBet.team}</span>
               </p>
-            ) : (
-              <p className="text-xs text-center text-muted-foreground mt-1">Pending result...</p>
+              {userBet.payout ? (
+                <p className={`text-center font-bold mt-1 ${userBet.status === 'won' ? 'text-green-400' : 'text-red-400'}`}>
+                  {userBet.status === 'won' ? `Won ${formatCurrency(userBet.payout)}!` : 'Lost'}
+                </p>
+              ) : (
+                <p className="text-xs text-center text-muted-foreground mt-1">Pending result…</p>
+              )}
+            </div>
+
+            {/* Edit / Cancel row — only while match is editable */}
+            {canEdit && (
+              <div className="flex border-t border-white/10">
+                <button
+                  onClick={() => {
+                    setEditTeam(userBet.team);
+                    setEditAmount(userBet.amount.toString());
+                    setEditOpen(true);
+                  }}
+                  className="flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-semibold text-blue-400 hover:bg-blue-500/10 transition-colors rounded-bl-xl"
+                >
+                  <Pencil className="h-3.5 w-3.5" /> Edit Bet
+                </button>
+                <div className="w-px bg-white/10" />
+                <button
+                  onClick={handleCancel}
+                  disabled={cancelling}
+                  className="flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-semibold text-red-400 hover:bg-red-500/10 transition-colors rounded-br-xl disabled:opacity-50"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  {cancelling ? "Cancelling…" : "Cancel Bet"}
+                </button>
+              </div>
             )}
           </div>
         )}
 
-        {/* Actions */}
+        {/* Place Bet button */}
         {canBet && (
           <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
             <DialogTrigger asChild>
@@ -182,11 +266,8 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
             <DialogContent>
               <DialogHeader>
                 <DialogTitle>Place your bet</DialogTitle>
-                <DialogDescription>
-                  Choose a team and enter your wager amount.
-                </DialogDescription>
+                <DialogDescription>Choose a team and enter your wager amount.</DialogDescription>
               </DialogHeader>
-              
               <form onSubmit={handleBetSubmit} className="mt-4 space-y-6">
                 <div className="grid grid-cols-2 gap-4">
                   {[match.team1, match.team2].map(team => (
@@ -195,8 +276,8 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
                       type="button"
                       onClick={() => setBetTeam(team)}
                       className={`py-4 px-4 rounded-xl font-display font-semibold text-lg transition-all border-2 ${
-                        betTeam === team 
-                          ? 'border-primary bg-primary/10 text-primary shadow-[0_0_15px_rgba(245,158,11,0.2)]' 
+                        betTeam === team
+                          ? 'border-primary bg-primary/10 text-primary shadow-[0_0_15px_rgba(245,158,11,0.2)]'
                           : 'border-white/10 bg-secondary hover:border-white/20 text-white'
                       }`}
                     >
@@ -204,11 +285,8 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
                     </button>
                   ))}
                 </div>
-
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-muted-foreground block">
-                    Bet Amount (USD)
-                  </label>
+                  <label className="text-sm font-medium text-muted-foreground block">Bet Amount (USD)</label>
                   <div className="relative">
                     <span className="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-muted-foreground">$</span>
                     <input
@@ -223,7 +301,6 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
                     />
                   </div>
                 </div>
-
                 <button
                   type="submit"
                   disabled={!betTeam || !betAmount || Number(betAmount) < 1 || placeBet.isPending}
@@ -235,7 +312,70 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
             </DialogContent>
           </Dialog>
         )}
+
+        {/* Locked message — has bet but match is locked/live/finished and bet is pending */}
+        {userBet && !canEdit && userBet.status === 'pending' && !isFinished && (
+          <p className="text-xs text-center text-muted-foreground">Betting locked — match is {match.status}</p>
+        )}
       </div>
+
+      {/* Edit Bet Dialog */}
+      <Dialog open={editOpen} onOpenChange={(o) => !o && setEditOpen(false)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Your Bet</DialogTitle>
+            <DialogDescription>Change your team or wager amount.</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleEditSave} className="mt-4 space-y-5">
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">Switch Team</label>
+              <div className="grid grid-cols-2 gap-3">
+                {[match.team1, match.team2].map(t => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setEditTeam(t)}
+                    className={`py-3 px-4 rounded-xl border font-semibold text-sm transition-all ${
+                      editTeam === t
+                        ? 'border-primary bg-primary/20 text-white'
+                        : 'border-white/10 text-muted-foreground hover:border-white/30'
+                    }`}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-1">Wager Amount</label>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={editAmount}
+                onChange={e => setEditAmount(e.target.value)}
+                className="w-full px-4 py-2 rounded-lg bg-background border border-white/10 text-white focus:outline-none focus:border-primary"
+              />
+            </div>
+            <div className="flex gap-3 pt-1">
+              <button
+                type="button"
+                onClick={() => setEditOpen(false)}
+                className="flex-1 py-2.5 rounded-xl border border-white/10 text-muted-foreground hover:text-white transition-colors text-sm font-semibold"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={saving}
+                className="flex-1 py-2.5 rounded-xl bg-primary text-primary-foreground font-bold text-sm disabled:opacity-60"
+              >
+                {saving ? "Saving…" : "Save Changes"}
+              </button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

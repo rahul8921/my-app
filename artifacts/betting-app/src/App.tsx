@@ -55,10 +55,10 @@ function Router() {
   return (
     <Switch>
       <Route path="/">
-        {() => <ProtectedRoute component={Matches} />}
+        {() => <ProtectedRoute component={Matches} requireApproved />}
       </Route>
       <Route path="/matches">
-        {() => <ProtectedRoute component={Matches} />}
+        {() => <ProtectedRoute component={Matches} requireApproved />}
       </Route>
       <Route path="/my-bets">
         {() => <ProtectedRoute component={MyBets} requireApproved />}
