@@ -240,27 +240,54 @@ router.post("/admin/import-matches", async (req: Request, res: Response) => {
   }
 
   try {
-    // Fetch all upcoming/current matches from CricAPI
-    let allApiMatches: CricApiMatchItem[] = [];
-    // Paginate up to 2 pages (offset 0 and 25) to get a broad list
-    for (const offset of [0, 25]) {
-      const url = `${CRICAPI_BASE}/matches?apikey=${apiKey}&offset=${offset}`;
-      const resp = await fetch(url);
-      if (!resp.ok) break;
-      const data = await resp.json() as { status: string; data?: CricApiMatchItem[] };
-      if (data.status !== "success" || !data.data?.length) break;
-      allApiMatches = allApiMatches.concat(data.data);
+    // Step 1: Find the current IPL series ID by searching the series list
+    let iplSeriesId: string | null = null;
+    const currentYear = new Date().getFullYear();
+
+    for (const offset of [0, 25, 50, 75]) {
+      const seriesResp = await fetch(`${CRICAPI_BASE}/series?apikey=${apiKey}&offset=${offset}`);
+      if (!seriesResp.ok) break;
+      const seriesData = await seriesResp.json() as { status: string; data?: { id: string; name: string }[] };
+      if (seriesData.status !== "success" || !seriesData.data?.length) break;
+
+      const found = seriesData.data.find(s => {
+        const n = s.name?.toLowerCase() ?? "";
+        return (n.includes("indian premier league") || n.includes("ipl")) && n.includes(String(currentYear));
+      });
+
+      if (found) {
+        iplSeriesId = found.id;
+        break;
+      }
     }
 
-    // Filter: upcoming T20 IPL matches that haven't started
-    const now = new Date();
+    if (!iplSeriesId) {
+      res.json({ imported: 0, skipped: 0, matches: [], message: `IPL ${currentYear} series not found in CricAPI yet` });
+      return;
+    }
+
+    // Step 2: Fetch match list from the IPL series
+    const seriesInfoResp = await fetch(`${CRICAPI_BASE}/series_info?apikey=${apiKey}&id=${iplSeriesId}`);
+    if (!seriesInfoResp.ok) {
+      res.status(502).json({ error: "Failed to fetch IPL series info from CricAPI" });
+      return;
+    }
+    const seriesInfoData = await seriesInfoResp.json() as {
+      status: string;
+      data?: { info?: { name: string }; matchList?: CricApiMatchItem[] };
+    };
+    if (seriesInfoData.status !== "success" || !seriesInfoData.data?.matchList) {
+      res.json({ imported: 0, skipped: 0, matches: [], message: "No match list in IPL series" });
+      return;
+    }
+
+    const allApiMatches: CricApiMatchItem[] = seriesInfoData.data.matchList;
+
+    // Filter: only include matches with two known IPL teams that haven't ended
     const iplMatches = allApiMatches.filter(m => {
-      if (m.matchStarted || m.matchEnded) return false;
+      if (m.matchEnded) return false;
       if (!m.teams || m.teams.length < 2) return false;
-      const matchDate = new Date(m.dateTimeGMT || m.date);
-      if (matchDate <= now) return false;
-      // At least one team must be an IPL team
-      return isIplTeam(m.teams[0]) || isIplTeam(m.teams[1]);
+      return isIplTeam(m.teams[0]) && isIplTeam(m.teams[1]);
     });
 
     // Load existing DB matches to deduplicate
