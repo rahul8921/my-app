@@ -37,6 +37,11 @@ import {
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
+const TEAM_LOGO_NAMES = ["CSK", "MI", "RCB", "KKR", "SRH", "DC", "PBKS", "RR", "GT", "LSG"];
+const TEAM_LOGOS: Record<string, string> = Object.fromEntries(
+  TEAM_LOGO_NAMES.map(t => [t, `${BASE}/team-logos/${t}.png`])
+);
+
 function formatMatchDate(dateStr: string) {
   const date = new Date(dateStr);
   return new Intl.DateTimeFormat("en-US", {
@@ -63,6 +68,7 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
   const [betAmount, setBetAmount] = useState<string>("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [hoveredTeam, setHoveredTeam] = useState<string | null>(null);
+  const [logoErrors, setLogoErrors] = useState<Set<string>>(new Set());
 
   // Edit state
   const [editOpen, setEditOpen] = useState(false);
@@ -200,10 +206,19 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
                 onMouseLeave={() => setHoveredTeam(null)}
               >
                 <div
-                  className="relative h-16 w-16 rounded-full border-2 flex items-center justify-center text-base font-black shadow-inner transition-transform duration-200 hover:scale-110"
+                  className="relative h-16 w-16 rounded-full border-2 flex items-center justify-center text-base font-black shadow-inner transition-transform duration-200 hover:scale-110 overflow-hidden"
                   style={{ backgroundColor: c1.bg, borderColor: c1.border, color: c1.text, boxShadow: `0 0 16px ${c1.glow}` }}
                 >
-                  {match.team1.substring(0, 3).toUpperCase()}
+                  {TEAM_LOGOS[match.team1.toUpperCase()] && !logoErrors.has(match.team1) ? (
+                    <img
+                      src={TEAM_LOGOS[match.team1.toUpperCase()]}
+                      alt={match.team1}
+                      className="h-11 w-11 object-contain"
+                      onError={() => setLogoErrors(prev => new Set(prev).add(match.team1))}
+                    />
+                  ) : (
+                    <span>{match.team1.substring(0, 3).toUpperCase()}</span>
+                  )}
                   {isFinished && match.winner === match.team1 && (
                     <div className="absolute -top-3 -right-3 text-2xl drop-shadow-[0_0_8px_rgba(245,158,11,0.8)]">👑</div>
                   )}
@@ -262,10 +277,19 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
                 onMouseLeave={() => setHoveredTeam(null)}
               >
                 <div
-                  className="relative h-16 w-16 rounded-full border-2 flex items-center justify-center text-base font-black shadow-inner transition-transform duration-200 hover:scale-110"
+                  className="relative h-16 w-16 rounded-full border-2 flex items-center justify-center text-base font-black shadow-inner transition-transform duration-200 hover:scale-110 overflow-hidden"
                   style={{ backgroundColor: c2.bg, borderColor: c2.border, color: c2.text, boxShadow: `0 0 16px ${c2.glow}` }}
                 >
-                  {match.team2.substring(0, 3).toUpperCase()}
+                  {TEAM_LOGOS[match.team2.toUpperCase()] && !logoErrors.has(match.team2) ? (
+                    <img
+                      src={TEAM_LOGOS[match.team2.toUpperCase()]}
+                      alt={match.team2}
+                      className="h-11 w-11 object-contain"
+                      onError={() => setLogoErrors(prev => new Set(prev).add(match.team2))}
+                    />
+                  ) : (
+                    <span>{match.team2.substring(0, 3).toUpperCase()}</span>
+                  )}
                   {isFinished && match.winner === match.team2 && (
                     <div className="absolute -top-3 -right-3 text-2xl drop-shadow-[0_0_8px_rgba(245,158,11,0.8)]">👑</div>
                   )}
