@@ -120,7 +120,7 @@ router.get("/leaderboard", async (req: Request, res: Response) => {
         }
       }
 
-      const netBalance = totalWon - totalBetAmount;
+      const netBalance = Math.max(0, totalWon - totalBetAmount);
 
       return {
         id: user.id,
