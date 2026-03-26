@@ -1,6 +1,6 @@
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@workspace/replit-auth-web";
-import { Crown, LayoutDashboard, Ticket, Trophy, LogOut } from "lucide-react";
+import { Crown, LayoutDashboard, Ticket, Trophy, LogOut, BarChart2 } from "lucide-react";
 import { motion } from "framer-motion";
 
 export function Navbar() {
@@ -12,6 +12,7 @@ export function Navbar() {
   const links = [
     { href: "/matches", label: "Matches", icon: Trophy },
     ...(user.status === 'approved' ? [{ href: "/my-bets", label: "My Bets", icon: Ticket }] : []),
+    ...(user.status === 'approved' ? [{ href: "/leaderboard", label: "Leaderboard", icon: BarChart2 }] : []),
     ...(user.isAdmin ? [{ href: "/admin", label: "Admin", icon: LayoutDashboard }] : []),
   ];
 

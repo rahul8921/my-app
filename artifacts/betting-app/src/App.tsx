@@ -11,6 +11,7 @@ import Matches from "@/pages/Matches";
 import MyBets from "@/pages/MyBets";
 import Admin from "@/pages/Admin";
 import Pending from "@/pages/Pending";
+import Leaderboard from "@/pages/Leaderboard";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -64,6 +65,9 @@ function Router() {
       </Route>
       <Route path="/admin">
         {() => <ProtectedRoute component={Admin} requireApproved />}
+      </Route>
+      <Route path="/leaderboard">
+        {() => <ProtectedRoute component={Leaderboard} requireApproved />}
       </Route>
       <Route component={NotFound} />
     </Switch>

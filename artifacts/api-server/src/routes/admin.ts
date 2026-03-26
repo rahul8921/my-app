@@ -54,6 +54,51 @@ async function getUserWithStats(userId: string) {
   };
 }
 
+router.get("/leaderboard", async (req: Request, res: Response) => {
+  if (!req.isAuthenticated()) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const users = await db
+    .select()
+    .from(usersTable)
+    .where(eq(usersTable.status, "approved"));
+
+  const result = await Promise.all(
+    users.map(async (user) => {
+      const bets = await db
+        .select()
+        .from(betsTable)
+        .where(eq(betsTable.userId, user.id));
+
+      let totalBetAmount = 0;
+      let totalWon = 0;
+      for (const bet of bets) {
+        totalBetAmount += parseFloat(bet.amount as string);
+        if (bet.status === "won" && bet.payout) {
+          totalWon += parseFloat(bet.payout as string);
+        }
+      }
+
+      const netBalance = totalWon - totalBetAmount;
+
+      return {
+        id: user.id,
+        username: user.username ?? "Unknown",
+        profileImage: user.profileImageUrl ?? undefined,
+        totalBetAmount,
+        totalWon,
+        netBalance,
+        totalBets: bets.length,
+      };
+    })
+  );
+
+  const sorted = result.sort((a, b) => b.netBalance - a.netBalance);
+  res.json(sorted);
+});
+
 router.get("/admin/users", async (req: Request, res: Response) => {
   if (!isAdmin(req, res)) return;
 
