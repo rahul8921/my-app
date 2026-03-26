@@ -163,7 +163,7 @@ export default function MyBets() {
             return (
               <div
                 key={bet.id}
-                className={`relative overflow-hidden flex flex-col md:flex-row items-start md:items-center justify-between p-6 rounded-2xl border transition-all ${
+                className={`relative overflow-hidden flex flex-col p-6 rounded-2xl border transition-all ${
                   isWon ? 'bg-green-500/5 border-green-500/20 shadow-[0_0_30px_-10px_rgba(34,197,94,0.1)]' :
                   isLost ? 'bg-red-500/5 border-red-500/20' :
                   isLocked && !isFinished ? 'bg-red-500/5 border-red-500/20' :
@@ -171,7 +171,7 @@ export default function MyBets() {
                 }`}
               >
                 {/* Match Info */}
-                <div className="flex-1 mb-4 md:mb-0">
+                <div className="mb-4">
                   <div className="flex items-center gap-2 mb-2 flex-wrap">
                     <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
                       {format(new Date(match.matchDate), "MMM d, yyyy • h:mm a")}
@@ -201,9 +201,9 @@ export default function MyBets() {
                   </h4>
                 </div>
 
-                {/* Bet Info + Actions */}
-                <div className="flex items-center gap-6 w-full md:w-auto">
-                  <div className="flex items-center gap-6 flex-1 bg-secondary/50 md:bg-transparent p-4 md:p-0 rounded-xl">
+                {/* Bet Info */}
+                <div className="flex items-center gap-6 w-full">
+                  <div className="flex items-center gap-6 flex-1 bg-secondary/50 p-4 rounded-xl">
                     <div>
                       <p className="text-xs text-muted-foreground mb-1">Your Pick</p>
                       <p className="font-bold text-white">{bet.team}</p>
@@ -228,28 +228,27 @@ export default function MyBets() {
                       )}
                     </div>
                   </div>
-
-                  {/* Edit / Cancel — only before match time */}
-                  {isEditable && (
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      <button
-                        onClick={() => openEdit(bet)}
-                        className="p-2 rounded-lg text-blue-400 hover:bg-blue-500/10 transition-colors"
-                        title="Edit bet"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </button>
-                      <button
-                        onClick={() => handleCancel(bet.id)}
-                        disabled={cancelling === bet.id}
-                        className="p-2 rounded-lg text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-50"
-                        title="Cancel bet"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  )}
                 </div>
+
+                {/* Edit / Cancel row — only before match time */}
+                {isEditable && (
+                  <div className="flex gap-3 mt-4 pt-4 border-t border-white/5 w-full">
+                    <button
+                      onClick={() => openEdit(bet)}
+                      className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border border-blue-500/30 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 font-semibold text-sm transition-colors"
+                    >
+                      <Pencil className="h-4 w-4" /> Edit Bet
+                    </button>
+                    <button
+                      onClick={() => handleCancel(bet.id)}
+                      disabled={cancelling === bet.id}
+                      className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20 font-semibold text-sm transition-colors disabled:opacity-50"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      {cancelling === bet.id ? "Cancelling…" : "Cancel Bet"}
+                    </button>
+                  </div>
+                )}
               </div>
             );
           })}
