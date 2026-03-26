@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/dialog";
 
 export default function Admin() {
-  const { user } = useAuth();
+  const { user, isLoading } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -149,6 +149,7 @@ export default function Admin() {
     }
   }
 
+  if (isLoading) return null;
   if (!user?.isAdmin) {
     return <div className="p-8 text-center text-red-500">Access Denied</div>;
   }
