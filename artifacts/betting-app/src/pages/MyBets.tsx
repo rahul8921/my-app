@@ -174,7 +174,7 @@ export default function MyBets() {
                 <div className="mb-4">
                   <div className="flex items-center gap-2 mb-2 flex-wrap">
                     <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                      {new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true }).format(new Date(match.matchDate))} ET
+                      {new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true }).format(new Date(match.matchDate))} IST
                     </span>
                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
                       isLive ? 'bg-red-500/20 text-red-400 animate-pulse' :

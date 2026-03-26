@@ -19,14 +19,14 @@ const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 function formatMatchDate(dateStr: string) {
   const date = new Date(dateStr);
-  return new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
+  return new Intl.DateTimeFormat("en-IN", {
+    timeZone: "Asia/Kolkata",
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
-  }).format(date) + " ET";
+  }).format(date) + " IST";
 }
 
 interface MatchCardProps {
