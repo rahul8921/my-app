@@ -156,7 +156,7 @@ export default function MyBets() {
             const isPending = bet.status === 'pending';
             const isLive = match.status === 'live';
             const matchStarted = new Date() >= new Date(match.matchDate);
-            const isEditable = !matchStarted && match.status !== 'finished';
+            const isEditable = !matchStarted && match.status === 'upcoming';
 
             return (
               <div

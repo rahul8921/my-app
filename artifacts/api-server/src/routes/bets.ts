@@ -102,7 +102,7 @@ router.post("/bets", async (req: Request, res: Response) => {
     return;
   }
 
-  if (new Date() >= match.matchDate) {
+  if (new Date() >= match.matchDate || match.status !== "upcoming") {
     res.status(400).json({ error: "Betting is locked — the match time has passed" });
     return;
   }
@@ -197,7 +197,7 @@ router.patch("/bets/:betId", async (req: Request, res: Response) => {
     .from(matchesTable)
     .where(eq(matchesTable.id, bet.matchId));
 
-  if (!match || new Date() >= match.matchDate) {
+  if (!match || new Date() >= match.matchDate || match.status !== "upcoming") {
     res.status(400).json({ error: "Betting is locked — the match time has passed" });
     return;
   }
@@ -268,7 +268,7 @@ router.delete("/bets/:betId", async (req: Request, res: Response) => {
     .from(matchesTable)
     .where(eq(matchesTable.id, bet.matchId));
 
-  if (!match || new Date() >= match.matchDate) {
+  if (!match || new Date() >= match.matchDate || match.status !== "upcoming") {
     res.status(400).json({ error: "Betting is locked — the match time has passed" });
     return;
   }
