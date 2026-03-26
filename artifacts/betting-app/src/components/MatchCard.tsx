@@ -111,8 +111,8 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
 
   const handleBetSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!betTeam || !betAmount || Number(betAmount) < 1) return;
-    placeBet.mutate({ data: { matchId: match.id, team: betTeam, amount: Number(betAmount) } });
+    if (!betTeam) return;
+    placeBet.mutate({ data: { matchId: match.id, team: betTeam, amount: 10 } });
   };
 
   async function handleEditSave(e: React.FormEvent) {
@@ -121,10 +121,8 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
     setSaving(true);
     try {
       const payload: { amount?: number; team?: string } = {};
-      const amt = parseFloat(editAmount);
-      if (!isNaN(amt) && amt > 0 && amt !== userBet.amount) payload.amount = amt;
       if (editTeam && editTeam !== userBet.team) payload.team = editTeam;
-      if (!payload.amount && !payload.team) {
+      if (!payload.team) {
         toast({ title: "No changes made" });
         setEditOpen(false);
         return;
@@ -452,25 +450,25 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
                   ))}
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-muted-foreground block">Bet Amount (USD) <span className="text-primary font-bold">— max $10</span></label>
+                  <label className="text-sm font-medium text-muted-foreground block">Bet Amount (USD) <span className="text-primary font-bold">— fixed $10</span></label>
                   <div className="relative">
                     <span className="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-muted-foreground">$</span>
                     <input
                       type="number"
-                      min="1"
+                      min="10"
                       max="10"
                       step="1"
                       required
-                      value={betAmount}
-                      onChange={e => setBetAmount(e.target.value)}
-                      placeholder="10"
-                      className="w-full pl-8 pr-4 py-3 rounded-xl bg-background border-2 border-white/10 text-white font-display text-xl focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all"
+                      readOnly
+                      value={10}
+                      onChange={() => {}}
+                      className="w-full pl-8 pr-4 py-3 rounded-xl bg-background border-2 border-white/10 text-white font-display text-xl focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all opacity-70 cursor-not-allowed"
                     />
                   </div>
                 </div>
                 <button
                   type="submit"
-                  disabled={!betTeam || !betAmount || Number(betAmount) < 1 || Number(betAmount) > 10 || placeBet.isPending}
+                  disabled={!betTeam || placeBet.isPending}
                   className="w-full py-4 rounded-xl font-bold text-lg bg-primary text-primary-foreground shadow-lg shadow-primary/20 hover:shadow-primary/40 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                 >
                   {placeBet.isPending ? "Processing..." : "Confirm Wager"}
@@ -514,15 +512,16 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium text-muted-foreground mb-1">Wager Amount <span className="text-primary font-bold">— max $10</span></label>
+              <label className="block text-sm font-medium text-muted-foreground mb-1">Wager Amount <span className="text-primary font-bold">— fixed $10</span></label>
               <input
                 type="number"
-                min="1"
+                min="10"
                 max="10"
                 step="1"
-                value={editAmount}
-                onChange={e => setEditAmount(e.target.value)}
-                className="w-full px-4 py-2 rounded-lg bg-background border border-white/10 text-white focus:outline-none focus:border-primary"
+                readOnly
+                value={10}
+                onChange={() => {}}
+                className="w-full px-4 py-2 rounded-lg bg-background border border-white/10 text-white opacity-70 cursor-not-allowed"
               />
             </div>
             <div className="flex gap-3 pt-1">

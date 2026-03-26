@@ -165,7 +165,7 @@ export const ListMyBetsResponse = zod.array(ListMyBetsResponseItem);
 export const PlaceBetBody = zod.object({
   matchId: zod.number(),
   team: zod.string(),
-  amount: zod.number().min(1).max(10),
+  amount: zod.number().min(10).max(10),
 });
 
 /**
