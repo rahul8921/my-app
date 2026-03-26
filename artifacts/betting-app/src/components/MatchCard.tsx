@@ -452,24 +452,25 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
                   ))}
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-muted-foreground block">Bet Amount (USD)</label>
+                  <label className="text-sm font-medium text-muted-foreground block">Bet Amount (USD) <span className="text-primary font-bold">— max $10</span></label>
                   <div className="relative">
                     <span className="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-muted-foreground">$</span>
                     <input
                       type="number"
                       min="1"
-                      step="0.01"
+                      max="10"
+                      step="1"
                       required
                       value={betAmount}
                       onChange={e => setBetAmount(e.target.value)}
-                      placeholder="100"
+                      placeholder="10"
                       className="w-full pl-8 pr-4 py-3 rounded-xl bg-background border-2 border-white/10 text-white font-display text-xl focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all"
                     />
                   </div>
                 </div>
                 <button
                   type="submit"
-                  disabled={!betTeam || !betAmount || Number(betAmount) < 1 || placeBet.isPending}
+                  disabled={!betTeam || !betAmount || Number(betAmount) < 1 || Number(betAmount) > 10 || placeBet.isPending}
                   className="w-full py-4 rounded-xl font-bold text-lg bg-primary text-primary-foreground shadow-lg shadow-primary/20 hover:shadow-primary/40 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                 >
                   {placeBet.isPending ? "Processing..." : "Confirm Wager"}
@@ -513,10 +514,11 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium text-muted-foreground mb-1">Wager Amount</label>
+              <label className="block text-sm font-medium text-muted-foreground mb-1">Wager Amount <span className="text-primary font-bold">— max $10</span></label>
               <input
                 type="number"
                 min="1"
+                max="10"
                 step="1"
                 value={editAmount}
                 onChange={e => setEditAmount(e.target.value)}

@@ -214,8 +214,8 @@ router.patch("/bets/:betId", async (req: Request, res: Response) => {
     return;
   }
 
-  if (amount !== undefined && (typeof amount !== "number" || amount <= 0)) {
-    res.status(400).json({ error: "Amount must be a positive number" });
+  if (amount !== undefined && (typeof amount !== "number" || amount <= 0 || amount > 10)) {
+    res.status(400).json({ error: "Amount must be between $1 and $10" });
     return;
   }
 
