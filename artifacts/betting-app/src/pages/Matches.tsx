@@ -9,7 +9,9 @@ type Filter = "all" | "live" | "upcoming" | "finished";
 
 export default function Matches() {
   const { user } = useAuth();
-  const { data: matches, isLoading: isLoadingMatches } = useListMatches();
+  const { data: matches, isLoading: isLoadingMatches } = useListMatches({
+    query: { refetchInterval: 30_000 }
+  });
   const { data: bets } = useListMyBets({
     query: { enabled: user?.status === 'approved' }
   });

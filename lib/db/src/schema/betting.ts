@@ -12,6 +12,7 @@ export const matchesTable = pgTable("matches", {
     .notNull()
     .default("upcoming"),
   winner: varchar("winner"),
+  score: text("score"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

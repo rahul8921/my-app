@@ -194,6 +194,14 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
           </div>
         </div>
 
+        {/* Live Score */}
+        {match.score && (
+          <div className="bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-2.5 text-center">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-red-400 mb-1">Live Score</p>
+            <p className="text-sm font-mono font-semibold text-white leading-relaxed">{match.score}</p>
+          </div>
+        )}
+
         {/* Total Pool */}
         <div className="flex flex-col items-center bg-secondary/30 rounded-xl p-3 border border-white/5">
           <span className="text-xs text-muted-foreground mb-1">Total Pool</span>

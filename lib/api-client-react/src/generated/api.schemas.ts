@@ -48,6 +48,7 @@ export interface Match {
   matchDate: string;
   status: MatchStatus;
   winner?: string | null;
+  score?: string | null;
   totalBetsTeam1: number;
   totalBetsTeam2: number;
   createdAt: string;
