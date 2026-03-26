@@ -1,6 +1,6 @@
 import { useState } from "react";
+import { format } from "date-fns";
 
-import { useAuth } from "@workspace/replit-auth-web";
 import { 
   useListUsers, 
   useGetAdminStats, 
@@ -26,7 +26,6 @@ import {
 } from "@/components/ui/dialog";
 
 export default function Admin() {
-  const { user, isLoading } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -147,11 +146,6 @@ export default function Admin() {
     } finally {
       setImporting(false);
     }
-  }
-
-  if (isLoading) return null;
-  if (!user?.isAdmin) {
-    return <div className="p-8 text-center text-red-500">Access Denied</div>;
   }
 
   const pendingUsers = users?.filter(u => u.status === 'pending') || [];
