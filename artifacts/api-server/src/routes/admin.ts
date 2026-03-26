@@ -113,14 +113,18 @@ router.get("/leaderboard", async (req: Request, res: Response) => {
 
       let totalBetAmount = 0;
       let totalWon = 0;
+      let settledBetAmount = 0;
       for (const bet of bets) {
         totalBetAmount += parseFloat(bet.amount as string);
+        if (bet.status === "won" || bet.status === "lost") {
+          settledBetAmount += parseFloat(bet.amount as string);
+        }
         if (bet.status === "won" && bet.payout) {
           totalWon += parseFloat(bet.payout as string);
         }
       }
 
-      const netBalance = Math.max(0, totalWon - totalBetAmount);
+      const netBalance = totalWon - settledBetAmount;
 
       return {
         id: user.id,
