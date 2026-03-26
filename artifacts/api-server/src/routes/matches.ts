@@ -129,13 +129,22 @@ router.post("/matches", async (req: Request, res: Response) => {
     return;
   }
 
-  const parsed = CreateMatchBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: "Invalid request body" });
+  const { team1, team2, matchDate } = req.body as {
+    team1?: string;
+    team2?: string;
+    matchDate?: string;
+  };
+
+  if (!team1 || !team2 || !matchDate) {
+    res.status(400).json({ error: "team1, team2, and matchDate are required" });
     return;
   }
 
-  const { team1, team2, matchDate } = parsed.data;
+  const parsedDate = new Date(matchDate);
+  if (isNaN(parsedDate.getTime())) {
+    res.status(400).json({ error: "Invalid matchDate format" });
+    return;
+  }
 
   const [match] = await db
     .insert(matchesTable)
