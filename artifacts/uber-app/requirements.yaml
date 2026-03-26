@@ -1,0 +1,19 @@
+packages:
+  "leaflet": "Interactive maps"
+  "react-leaflet": "React components for Leaflet maps"
+  "@types/leaflet": "Types for Leaflet"
+  "framer-motion": "Smooth animations for UI elements and page transitions"
+  "date-fns": "Date formatting for ride history"
+  "clsx": "Utility for constructing className strings conditionally"
+  "tailwind-merge": "Utility for merging tailwind classes safely"
+  "@workspace/replit-auth-web": "Replit auth hook (already in workspace, ensuring available)"
+
+images:
+  - path: "artifacts/uber-app/public/images/hero-map.png"
+    description: "Abstract minimal vector map illustration with route lines and glowing dots, deep navy and vibrant purple accents"
+    aspect_ratio: "16:9"
+
+notes:
+  - Assumes Replit Auth is used for user context
+  - Uses @workspace/api-client-react for API hooks
+  - Relies on OpenStreetMap for map tiles (no API key needed)

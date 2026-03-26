@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/uber-app/"
+title = "RideNow - Ride Hailing"
+version = "1.0.0"
+id = "artifacts/uber-app"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/uber-app/" ]
+localPort = 22246
+
+[services.development]
+run = "pnpm --filter @workspace/uber-app run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/uber-app", "run", "build" ]
+publicDir = "artifacts/uber-app/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22246"
+BASE_PATH = "/uber-app/"

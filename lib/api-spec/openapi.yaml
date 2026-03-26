@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: Api
   version: 0.1.0
-  description: Betting platform API
+  description: Betting platform API + Ride hailing API
 servers:
   - url: /api
     description: Base API path
@@ -19,6 +19,10 @@ tags:
     description: User management
   - name: admin
     description: Admin operations
+  - name: rides
+    description: Ride hailing operations
+  - name: driver
+    description: Driver operations
 paths:
   /healthz:
     get:
@@ -316,6 +320,345 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  # ─── Ride Hailing ───────────────────────────────────────────
+
+  /rides:
+    post:
+      operationId: requestRide
+      tags: [rides]
+      summary: Request a new ride (rider)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequestRideBody"
+      responses:
+        "201":
+          description: Ride created and queued for drivers
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ride"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /rides/active:
+    get:
+      operationId: getActiveRide
+      tags: [rides]
+      summary: Get the current active ride for the authenticated user (as rider or driver)
+      responses:
+        "200":
+          description: Active ride or null
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActiveRideResponse"
+
+  /rides/history:
+    get:
+      operationId: listRideHistory
+      tags: [rides]
+      summary: Get past completed/cancelled rides for the authenticated user
+      responses:
+        "200":
+          description: List of past rides
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RideWithDetails"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /rides/{rideId}/cancel:
+    post:
+      operationId: cancelRide
+      tags: [rides]
+      summary: Cancel a ride (rider or driver)
+      parameters:
+        - name: rideId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Ride cancelled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ride"
+        "400":
+          description: Cannot cancel in this state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /rides/{rideId}/accept:
+    post:
+      operationId: acceptRide
+      tags: [rides, driver]
+      summary: Driver accepts a pending ride
+      parameters:
+        - name: rideId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Ride accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ride"
+        "400":
+          description: Already accepted or driver busy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /rides/{rideId}/start:
+    post:
+      operationId: startRide
+      tags: [rides, driver]
+      summary: Driver marks ride as started (picked up rider)
+      parameters:
+        - name: rideId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Ride started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ride"
+        "400":
+          description: Ride not in accepted state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /rides/{rideId}/complete:
+    post:
+      operationId: completeRide
+      tags: [rides, driver]
+      summary: Driver marks ride as completed
+      parameters:
+        - name: rideId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Ride completed with fare
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ride"
+        "400":
+          description: Ride not in progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /rides/{rideId}/rate:
+    post:
+      operationId: rateRide
+      tags: [rides]
+      summary: Rider rates a completed ride
+      parameters:
+        - name: rideId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RateRideBody"
+      responses:
+        "200":
+          description: Rating submitted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ride"
+        "400":
+          description: Already rated or not completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ─── Driver ─────────────────────────────────────────────────
+
+  /driver/profile:
+    get:
+      operationId: getDriverProfile
+      tags: [driver]
+      summary: Get the current user's driver profile
+      responses:
+        "200":
+          description: Driver profile or null if not a driver
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverProfileResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /driver/register:
+    post:
+      operationId: registerAsDriver
+      tags: [driver]
+      summary: Register the current user as a driver
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterDriverBody"
+      responses:
+        "201":
+          description: Driver profile created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverProfile"
+        "400":
+          description: Already registered as driver
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /driver/availability:
+    patch:
+      operationId: updateDriverAvailability
+      tags: [driver]
+      summary: Toggle driver online/offline status
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAvailabilityBody"
+      responses:
+        "200":
+          description: Updated driver profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverProfile"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Driver profile not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /driver/location:
+    patch:
+      operationId: updateDriverLocation
+      tags: [driver]
+      summary: Update driver GPS location
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateLocationBody"
+      responses:
+        "200":
+          description: Location updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverProfile"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /driver/pending-rides:
+    get:
+      operationId: listPendingRides
+      tags: [driver]
+      summary: List pending ride requests available for a driver to accept
+      responses:
+        "200":
+          description: List of pending rides
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RideWithDetails"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -541,3 +884,231 @@ components:
           type: string
       required:
         - error
+
+    # ─── Ride Hailing Schemas ────────────────────────────────────
+
+    ActiveRideResponse:
+      type: object
+      properties:
+        ride:
+          $ref: "#/components/schemas/RideWithDetails"
+          nullable: true
+      required:
+        - ride
+
+    DriverProfileResponse:
+      type: object
+      properties:
+        profile:
+          $ref: "#/components/schemas/DriverProfile"
+          nullable: true
+      required:
+        - profile
+
+    Ride:
+      type: object
+      properties:
+        id:
+          type: string
+        riderId:
+          type: string
+        driverId:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [requested, accepted, in_progress, completed, cancelled]
+        pickupAddress:
+          type: string
+        dropoffAddress:
+          type: string
+        pickupLat:
+          type: number
+        pickupLng:
+          type: number
+        dropoffLat:
+          type: number
+        dropoffLng:
+          type: number
+        fare:
+          type: number
+          nullable: true
+        riderRating:
+          type: integer
+          nullable: true
+        requestedAt:
+          type: string
+          format: date-time
+        acceptedAt:
+          type: string
+          format: date-time
+          nullable: true
+        startedAt:
+          type: string
+          format: date-time
+          nullable: true
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+        - id
+        - riderId
+        - status
+        - pickupAddress
+        - dropoffAddress
+        - pickupLat
+        - pickupLng
+        - dropoffLat
+        - dropoffLng
+        - requestedAt
+
+    RideWithDetails:
+      allOf:
+        - $ref: "#/components/schemas/Ride"
+        - type: object
+          properties:
+            rider:
+              type: object
+              properties:
+                id:
+                  type: string
+                username:
+                  type: string
+                profileImageUrl:
+                  type: string
+                  nullable: true
+              required:
+                - id
+            driver:
+              type: object
+              nullable: true
+              properties:
+                id:
+                  type: string
+                username:
+                  type: string
+                profileImageUrl:
+                  type: string
+                  nullable: true
+                vehicle:
+                  type: string
+                  nullable: true
+                licensePlate:
+                  type: string
+                  nullable: true
+                rating:
+                  type: number
+                  nullable: true
+                currentLat:
+                  type: number
+                  nullable: true
+                currentLng:
+                  type: number
+                  nullable: true
+              required:
+                - id
+
+    DriverProfile:
+      type: object
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        username:
+          type: string
+          nullable: true
+        profileImageUrl:
+          type: string
+          nullable: true
+        vehicle:
+          type: string
+          nullable: true
+        licensePlate:
+          type: string
+          nullable: true
+        isAvailable:
+          type: boolean
+        currentLat:
+          type: number
+          nullable: true
+        currentLng:
+          type: number
+          nullable: true
+        rating:
+          type: number
+          nullable: true
+        totalRides:
+          type: integer
+        totalEarnings:
+          type: number
+      required:
+        - id
+        - userId
+        - isAvailable
+        - totalRides
+        - totalEarnings
+
+    RequestRideBody:
+      type: object
+      properties:
+        pickupAddress:
+          type: string
+        dropoffAddress:
+          type: string
+        pickupLat:
+          type: number
+        pickupLng:
+          type: number
+        dropoffLat:
+          type: number
+        dropoffLng:
+          type: number
+      required:
+        - pickupAddress
+        - dropoffAddress
+        - pickupLat
+        - pickupLng
+        - dropoffLat
+        - dropoffLng
+
+    RateRideBody:
+      type: object
+      properties:
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+      required:
+        - rating
+
+    RegisterDriverBody:
+      type: object
+      properties:
+        vehicle:
+          type: string
+        licensePlate:
+          type: string
+      required:
+        - vehicle
+        - licensePlate
+
+    UpdateAvailabilityBody:
+      type: object
+      properties:
+        isAvailable:
+          type: boolean
+      required:
+        - isAvailable
+
+    UpdateLocationBody:
+      type: object
+      properties:
+        lat:
+          type: number
+        lng:
+          type: number
+      required:
+        - lat
+        - lng
