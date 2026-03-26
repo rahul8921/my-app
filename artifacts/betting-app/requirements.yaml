@@ -1,0 +1,20 @@
+packages:
+  "framer-motion": "For premium smooth animations, page transitions, and interactive micro-animations"
+  "date-fns": "For elegant date and time formatting"
+  "clsx": "Utility for constructing className strings conditionally"
+  "tailwind-merge": "Utility for merging tailwind classes without style conflicts"
+  "@radix-ui/react-dialog": "For accessible modal dialogs"
+  "@radix-ui/react-tabs": "For accessible admin tabs"
+
+images:
+  - path: "artifacts/betting-app/public/images/hero-bg.png"
+    description: "Dark abstract stadium background with deep navy blue (#0f172a) and subtle gold/amber glowing dust particles and volumetric lighting. Cinematic, high-end sports betting aesthetic, dark mode."
+    aspect_ratio: "16:9"
+  - path: "artifacts/betting-app/public/images/logo-icon.png"
+    description: "Sleek, modern 3D gold crown emblem on a deep dark blue background. Premium, sharp edges, metallic reflections, minimalist sports betting icon."
+    aspect_ratio: "1:1"
+
+notes:
+  - "The app relies on @workspace/replit-auth-web for authentication state and redirects."
+  - "The API client hooks are imported from @workspace/api-client-react."
+  - "Using deep navy (#0f172a) and gold (#f59e0b) as the core aesthetic, enforcing a premium 'dark mode' sports betting feel."

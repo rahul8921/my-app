@@ -1,22 +1,30 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Betting platform API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Authentication operations
+  - name: matches
+    description: Match operations
+  - name: bets
+    description: Betting operations
+  - name: users
+    description: User management
+  - name: admin
+    description: Admin operations
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +32,290 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /auth/user:
+    get:
+      operationId: getCurrentAuthUser
+      tags: [auth]
+      summary: Get current user
+      responses:
+        "200":
+          description: Current user info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetCurrentAuthUserResponse"
+
+  /matches:
+    get:
+      operationId: listMatches
+      tags: [matches]
+      summary: List all matches
+      responses:
+        "200":
+          description: List of matches
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Match"
+    post:
+      operationId: createMatch
+      tags: [matches, admin]
+      summary: Create a new match (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMatchBody"
+      responses:
+        "201":
+          description: Created match
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Match"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /matches/{matchId}:
+    get:
+      operationId: getMatch
+      tags: [matches]
+      summary: Get a single match with betting info
+      parameters:
+        - name: matchId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Match details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MatchDetail"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /matches/{matchId}/result:
+    patch:
+      operationId: setMatchResult
+      tags: [matches, admin]
+      summary: Set match result (admin only)
+      parameters:
+        - name: matchId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetMatchResultBody"
+      responses:
+        "200":
+          description: Updated match
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Match"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /bets:
+    get:
+      operationId: listMyBets
+      tags: [bets]
+      summary: List current user bets
+      responses:
+        "200":
+          description: List of user bets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Bet"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: placeBet
+      tags: [bets]
+      summary: Place a bet on a match
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlaceBetBody"
+      responses:
+        "201":
+          description: Placed bet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Bet"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/users:
+    get:
+      operationId: listUsers
+      tags: [admin, users]
+      summary: List all users (admin only)
+      responses:
+        "200":
+          description: List of users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/UserWithStats"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/users/{userId}/approve:
+    patch:
+      operationId: approveUser
+      tags: [admin, users]
+      summary: Approve a user (admin only)
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserWithStats"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/users/{userId}/reject:
+    patch:
+      operationId: rejectUser
+      tags: [admin, users]
+      summary: Reject a user (admin only)
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserWithStats"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/stats:
+    get:
+      operationId: getAdminStats
+      tags: [admin]
+      summary: Get platform-wide stats (admin only)
+      responses:
+        "200":
+          description: Platform stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminStats"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +326,218 @@ components:
       required:
         - status
 
+    GetCurrentAuthUserResponse:
+      type: object
+      properties:
+        isAuthenticated:
+          type: boolean
+        user:
+          $ref: "#/components/schemas/AuthUser"
+      required:
+        - isAuthenticated
+
+    AuthUser:
+      type: object
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        profileImage:
+          type: string
+        isAdmin:
+          type: boolean
+        status:
+          type: string
+          enum: [pending, approved, rejected]
+      required:
+        - id
+        - isAdmin
+        - status
+
+    Match:
+      type: object
+      properties:
+        id:
+          type: integer
+        team1:
+          type: string
+        team2:
+          type: string
+        matchDate:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [upcoming, live, finished]
+        winner:
+          type: string
+          nullable: true
+        totalBetsTeam1:
+          type: number
+        totalBetsTeam2:
+          type: number
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - team1
+        - team2
+        - matchDate
+        - status
+        - totalBetsTeam1
+        - totalBetsTeam2
+        - createdAt
+
+    MatchDetail:
+      allOf:
+        - $ref: "#/components/schemas/Match"
+        - type: object
+          properties:
+            myBet:
+              $ref: "#/components/schemas/Bet"
+              nullable: true
+
+    CreateMatchBody:
+      type: object
+      properties:
+        team1:
+          type: string
+        team2:
+          type: string
+        matchDate:
+          type: string
+          format: date-time
+      required:
+        - team1
+        - team2
+        - matchDate
+
+    SetMatchResultBody:
+      type: object
+      properties:
+        winner:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [upcoming, live, finished]
+      required:
+        - status
+
+    Bet:
+      type: object
+      properties:
+        id:
+          type: integer
+        matchId:
+          type: integer
+        userId:
+          type: string
+        team:
+          type: string
+        amount:
+          type: number
+        payout:
+          type: number
+          nullable: true
+        status:
+          type: string
+          enum: [pending, won, lost]
+        createdAt:
+          type: string
+          format: date-time
+        match:
+          $ref: "#/components/schemas/Match"
+      required:
+        - id
+        - matchId
+        - userId
+        - team
+        - amount
+        - status
+        - createdAt
+
+    PlaceBetBody:
+      type: object
+      properties:
+        matchId:
+          type: integer
+        team:
+          type: string
+        amount:
+          type: number
+          minimum: 1
+      required:
+        - matchId
+        - team
+        - amount
+
+    UserWithStats:
+      type: object
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        profileImage:
+          type: string
+        isAdmin:
+          type: boolean
+        status:
+          type: string
+          enum: [pending, approved, rejected]
+        totalBetAmount:
+          type: number
+        totalBets:
+          type: integer
+        totalWon:
+          type: number
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - isAdmin
+        - status
+        - totalBetAmount
+        - totalBets
+        - totalWon
+        - createdAt
+
+    AdminStats:
+      type: object
+      properties:
+        totalUsers:
+          type: integer
+        pendingUsers:
+          type: integer
+        totalBetAmount:
+          type: number
+        totalMatches:
+          type: integer
+        activeMatches:
+          type: integer
+      required:
+        - totalUsers
+        - pendingUsers
+        - totalBetAmount
+        - totalMatches
+        - activeMatches
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error

@@ -2,7 +2,7 @@
 
 ## Overview
 
-pnpm workspace monorepo using TypeScript. Each package manages its own dependencies.
+BetZone — a full-stack sports betting platform with pnpm workspace monorepo using TypeScript. Users bet on teams for matches, with payouts divided proportionally based on money bet per team.
 
 ## Stack
 
@@ -14,83 +14,93 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
 - **Database**: PostgreSQL + Drizzle ORM
 - **Validation**: Zod (`zod/v4`), `drizzle-zod`
 - **API codegen**: Orval (from OpenAPI spec)
-- **Build**: esbuild (CJS bundle)
+- **Auth**: Replit Auth (OIDC + PKCE via openid-client v6)
+- **Frontend**: React + Vite, Tailwind CSS, Shadcn UI, React Query, Wouter
 
 ## Structure
 
 ```text
 artifacts-monorepo/
 ├── artifacts/              # Deployable applications
-│   └── api-server/         # Express API server
+│   ├── api-server/         # Express API server (auth, matches, bets, admin routes)
+│   └── betting-app/        # React + Vite frontend
 ├── lib/                    # Shared libraries
 │   ├── api-spec/           # OpenAPI spec + Orval codegen config
 │   ├── api-client-react/   # Generated React Query hooks
 │   ├── api-zod/            # Generated Zod schemas from OpenAPI
-│   └── db/                 # Drizzle ORM schema + DB connection
-├── scripts/                # Utility scripts (single workspace package)
-│   └── src/                # Individual .ts scripts, run via `pnpm --filter @workspace/scripts run <script>`
-├── pnpm-workspace.yaml     # pnpm workspace (artifacts/*, lib/*, lib/integrations/*, scripts)
-├── tsconfig.base.json      # Shared TS options (composite, bundler resolution, es2022)
-├── tsconfig.json           # Root TS project references
-└── package.json            # Root package with hoisted devDeps
+│   ├── db/                 # Drizzle ORM schema + DB connection
+│   └── replit-auth-web/    # useAuth() React hook for browser auth
+├── scripts/                # Utility scripts
+├── pnpm-workspace.yaml
+├── tsconfig.base.json
+├── tsconfig.json
+└── package.json
 ```
 
-## TypeScript & Composite Projects
+## Key Features
 
-Every package extends `tsconfig.base.json` which sets `composite: true`. The root `tsconfig.json` lists all packages as project references. This means:
+### User Features
+- Login via Replit Auth (OIDC PKCE)
+- Registration requires admin approval (pending/approved/rejected status)
+- Browse matches (upcoming, live, finished)
+- Place bets on a team for a match
+- View bet odds: proportional to total money bet per team
+- Winner team shows 👑 crown, loser shows 💀 skull
+- View personal bet history with payout info
 
-- **Always typecheck from the root** — run `pnpm run typecheck` (which runs `tsc --build --emitDeclarationOnly`). This builds the full dependency graph so that cross-package imports resolve correctly. Running `tsc` inside a single package will fail if its dependencies haven't been built yet.
-- **`emitDeclarationOnly`** — we only emit `.d.ts` files during typecheck; actual JS bundling is handled by esbuild/tsx/vite...etc, not `tsc`.
-- **Project references** — when package A depends on package B, A's `tsconfig.json` must list B in its `references` array. `tsc --build` uses this to determine build order and skip up-to-date packages.
+### Admin Features
+- First user to sign up is automatically admin + approved
+- Approve/reject pending users
+- View all users with total bet amounts and stats
+- Create new matches (team1, team2, date/time)
+- Update match results (set winner → auto-settles all bets proportionally)
+- View platform stats (total users, bets, amounts, active matches)
 
-## Root Scripts
+## Database Schema
 
-- `pnpm run build` — runs `typecheck` first, then recursively runs `build` in all packages that define it
-- `pnpm run typecheck` — runs `tsc --build --emitDeclarationOnly` using project references
+### `users` table
+- id, email, username, firstName, lastName, profileImageUrl
+- isAdmin (boolean), status (pending/approved/rejected)
+- createdAt, updatedAt
 
-## Packages
+### `sessions` table (Replit Auth)
+- sid, sess (jsonb), expire
 
-### `artifacts/api-server` (`@workspace/api-server`)
+### `matches` table
+- id, team1, team2, matchDate, status (upcoming/live/finished), winner
+- createdAt, updatedAt
 
-Express 5 API server. Routes live in `src/routes/` and use `@workspace/api-zod` for request and response validation and `@workspace/db` for persistence.
+### `bets` table
+- id, matchId, userId, team, amount, payout, status (pending/won/lost)
+- createdAt
 
-- Entry: `src/index.ts` — reads `PORT`, starts Express
-- App setup: `src/app.ts` — mounts CORS, JSON/urlencoded parsing, routes at `/api`
-- Routes: `src/routes/index.ts` mounts sub-routers; `src/routes/health.ts` exposes `GET /health` (full path: `/api/health`)
-- Depends on: `@workspace/db`, `@workspace/api-zod`
-- `pnpm --filter @workspace/api-server run dev` — run the dev server
-- `pnpm --filter @workspace/api-server run build` — production esbuild bundle (`dist/index.cjs`)
-- Build bundles an allowlist of deps (express, cors, pg, drizzle-orm, zod, etc.) and externalizes the rest
+## Payout Calculation
 
-### `lib/db` (`@workspace/db`)
+When a match finishes with a winner:
+- `payout = (betAmount / winnerPool) * totalPool`
+- Losers get payout = 0
 
-Database layer using Drizzle ORM with PostgreSQL. Exports a Drizzle client instance and schema models.
+## API Routes
 
-- `src/index.ts` — creates a `Pool` + Drizzle instance, exports schema
-- `src/schema/index.ts` — barrel re-export of all models
-- `src/schema/<modelname>.ts` — table definitions with `drizzle-zod` insert schemas (no models definitions exist right now)
-- `drizzle.config.ts` — Drizzle Kit config (requires `DATABASE_URL`, automatically provided by Replit)
-- Exports: `.` (pool, db, schema), `./schema` (schema only)
+All routes under `/api`:
+- `GET /auth/user` — current user (fresh from DB)
+- `GET /login` — redirect to OIDC
+- `GET /callback` — OIDC callback
+- `GET /logout` — OIDC end-session
+- `GET /matches` — all matches with bet totals
+- `GET /matches/:id` — single match with my bet
+- `POST /matches` — create match (admin)
+- `PATCH /matches/:id/result` — set result + settle bets (admin)
+- `GET /bets` — user's bets
+- `POST /bets` — place a bet
+- `GET /admin/users` — all users with stats (admin)
+- `PATCH /admin/users/:id/approve` — approve user (admin)
+- `PATCH /admin/users/:id/reject` — reject user (admin)
+- `GET /admin/stats` — platform stats (admin)
 
-Production migrations are handled by Replit when publishing. In development, we just use `pnpm --filter @workspace/db run push`, and we fallback to `pnpm --filter @workspace/db run push-force`.
+## Development
 
-### `lib/api-spec` (`@workspace/api-spec`)
-
-Owns the OpenAPI 3.1 spec (`openapi.yaml`) and the Orval config (`orval.config.ts`). Running codegen produces output into two sibling packages:
-
-1. `lib/api-client-react/src/generated/` — React Query hooks + fetch client
-2. `lib/api-zod/src/generated/` — Zod schemas
-
-Run codegen: `pnpm --filter @workspace/api-spec run codegen`
-
-### `lib/api-zod` (`@workspace/api-zod`)
-
-Generated Zod schemas from the OpenAPI spec (e.g. `HealthCheckResponse`). Used by `api-server` for response validation.
-
-### `lib/api-client-react` (`@workspace/api-client-react`)
-
-Generated React Query hooks and fetch client from the OpenAPI spec (e.g. `useHealthCheck`, `healthCheck`).
-
-### `scripts` (`@workspace/scripts`)
-
-Utility scripts package. Each script is a `.ts` file in `src/` with a corresponding npm script in `package.json`. Run scripts via `pnpm --filter @workspace/scripts run <script>`. Scripts can import any workspace package (e.g., `@workspace/db`) by adding it as a dependency in `scripts/package.json`.
+- `pnpm --filter @workspace/api-server run dev` — run API dev server
+- `pnpm --filter @workspace/betting-app run dev` — run frontend dev server
+- `pnpm --filter @workspace/db run push` — push DB schema changes
+- `pnpm --filter @workspace/api-spec run codegen` — regenerate API client
