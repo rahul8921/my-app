@@ -102,8 +102,8 @@ router.post("/bets", async (req: Request, res: Response) => {
     return;
   }
 
-  if (match.status === "finished") {
-    res.status(400).json({ error: "This match has already finished" });
+  if (match.status !== "upcoming") {
+    res.status(400).json({ error: "Bets are locked — this match has already started or finished" });
     return;
   }
 
@@ -168,6 +168,114 @@ router.post("/bets", async (req: Request, res: Response) => {
       createdAt: match.createdAt.toISOString(),
     },
   });
+});
+
+router.patch("/bets/:betId", async (req: Request, res: Response) => {
+  if (!req.isAuthenticated()) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const betId = parseInt(req.params.betId);
+  if (isNaN(betId)) {
+    res.status(400).json({ error: "Invalid bet id" });
+    return;
+  }
+
+  const [bet] = await db
+    .select()
+    .from(betsTable)
+    .where(and(eq(betsTable.id, betId), eq(betsTable.userId, req.user.id)));
+
+  if (!bet) {
+    res.status(404).json({ error: "Bet not found" });
+    return;
+  }
+
+  const [match] = await db
+    .select()
+    .from(matchesTable)
+    .where(eq(matchesTable.id, bet.matchId));
+
+  if (!match || match.status !== "upcoming") {
+    res.status(400).json({ error: "Bets are locked — this match has already started or finished" });
+    return;
+  }
+
+  const { amount, team } = req.body as { amount?: number; team?: string };
+
+  if (!amount && !team) {
+    res.status(400).json({ error: "Provide amount or team to update" });
+    return;
+  }
+
+  if (team && team !== match.team1 && team !== match.team2) {
+    res.status(400).json({ error: "Invalid team for this match" });
+    return;
+  }
+
+  if (amount !== undefined && (typeof amount !== "number" || amount <= 0)) {
+    res.status(400).json({ error: "Amount must be a positive number" });
+    return;
+  }
+
+  const updates: Partial<typeof betsTable.$inferInsert> = {};
+  if (team) updates.team = team;
+  if (amount) updates.amount = amount.toString();
+
+  const [updated] = await db
+    .update(betsTable)
+    .set(updates)
+    .where(eq(betsTable.id, betId))
+    .returning();
+
+  res.json({
+    id: updated.id,
+    matchId: updated.matchId,
+    userId: updated.userId,
+    team: updated.team,
+    amount: parseFloat(updated.amount as string),
+    payout: updated.payout ? parseFloat(updated.payout as string) : null,
+    status: updated.status,
+    createdAt: updated.createdAt.toISOString(),
+  });
+});
+
+router.delete("/bets/:betId", async (req: Request, res: Response) => {
+  if (!req.isAuthenticated()) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const betId = parseInt(req.params.betId);
+  if (isNaN(betId)) {
+    res.status(400).json({ error: "Invalid bet id" });
+    return;
+  }
+
+  const [bet] = await db
+    .select()
+    .from(betsTable)
+    .where(and(eq(betsTable.id, betId), eq(betsTable.userId, req.user.id)));
+
+  if (!bet) {
+    res.status(404).json({ error: "Bet not found" });
+    return;
+  }
+
+  const [match] = await db
+    .select()
+    .from(matchesTable)
+    .where(eq(matchesTable.id, bet.matchId));
+
+  if (!match || match.status !== "upcoming") {
+    res.status(400).json({ error: "Bets are locked — this match has already started or finished" });
+    return;
+  }
+
+  await db.delete(betsTable).where(eq(betsTable.id, betId));
+
+  res.json({ success: true });
 });
 
 export default router;
