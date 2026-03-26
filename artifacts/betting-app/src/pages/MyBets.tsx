@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useListMyBets } from "@workspace/api-client-react";
-import { format } from "date-fns";
+
 import { formatCurrency } from "@/lib/utils";
 import { ArrowRight, Ticket, Trophy, Pencil, Trash2, Lock } from "lucide-react";
 import { Link } from "wouter";
@@ -174,7 +174,7 @@ export default function MyBets() {
                 <div className="mb-4">
                   <div className="flex items-center gap-2 mb-2 flex-wrap">
                     <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                      {format(new Date(match.matchDate), "MMM d, yyyy • h:mm a")}
+                      {new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true }).format(new Date(match.matchDate))} ET
                     </span>
                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
                       isLive ? 'bg-red-500/20 text-red-400 animate-pulse' :

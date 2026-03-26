@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { format } from "date-fns";
+
 import { useAuth } from "@workspace/replit-auth-web";
 import { 
   useListUsers, 
@@ -288,7 +288,7 @@ export default function Admin() {
               <div key={match.id} className="bg-card border border-white/5 rounded-2xl p-6 relative">
                 <div className="flex justify-between items-start mb-4">
                   <span className="text-xs font-bold text-muted-foreground bg-secondary px-2 py-1 rounded">
-                    {format(new Date(match.matchDate), "MMM d, h:mm a")}
+                    {new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true }).format(new Date(match.matchDate))} ET
                   </span>
                   <div className="flex items-center gap-2">
                     <button

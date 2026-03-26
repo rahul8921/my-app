@@ -33,7 +33,22 @@ export default function Matches() {
     );
   }
 
-  const filteredMatches = matches?.filter(m => filter === "all" || m.status === filter) || [];
+  const statusOrder = (status: string) => {
+    if (status === "live") return 0;
+    if (status === "upcoming") return 1;
+    return 2; // finished/completed
+  };
+
+  const filteredMatches = (matches?.filter(m => filter === "all" || m.status === filter) || [])
+    .slice()
+    .sort((a, b) => {
+      const orderDiff = statusOrder(a.status) - statusOrder(b.status);
+      if (orderDiff !== 0) return orderDiff;
+      const aTime = new Date(a.matchDate).getTime();
+      const bTime = new Date(b.matchDate).getTime();
+      // upcoming & live: soonest first; finished: most recent first
+      return a.status === "finished" ? bTime - aTime : aTime - bTime;
+    });
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12">

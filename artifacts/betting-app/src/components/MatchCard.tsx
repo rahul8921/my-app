@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { format } from "date-fns";
 import { Coins, Pencil, Trash2 } from "lucide-react";
 import { Match, Bet } from "@workspace/api-client-react/src/generated/api.schemas";
 import { usePlaceBet } from "@workspace/api-client-react";
@@ -16,6 +15,18 @@ import {
 } from "@/components/ui/dialog";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+
+function formatMatchDate(dateStr: string) {
+  const date = new Date(dateStr);
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(date) + " ET";
+}
 
 interface MatchCardProps {
   match: Match;
@@ -148,7 +159,7 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
           </span>
         </div>
         <span className="text-sm font-medium text-muted-foreground">
-          {format(new Date(match.matchDate), "MMM d, h:mm a")}
+          {formatMatchDate(match.matchDate)}
         </span>
       </div>
 
