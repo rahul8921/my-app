@@ -85,15 +85,6 @@ export default function Matches() {
         </div>
       </div>
 
-      {!isApproved && (
-        <div className="mb-8 p-6 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-200">
-          <p className="font-semibold flex items-center gap-2">
-            <Trophy className="h-5 w-5" /> 
-            You must be approved by an administrator to place bets.
-          </p>
-        </div>
-      )}
-
       {filteredMatches.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 bg-card rounded-3xl border border-dashed border-white/10">
           <Trophy className="h-16 w-16 text-muted-foreground mb-4 opacity-50" />

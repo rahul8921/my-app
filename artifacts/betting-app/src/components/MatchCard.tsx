@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { Coins, Pencil, Trash2 } from "lucide-react";
+import { Coins, Pencil, Trash2, LogIn, Clock } from "lucide-react";
 import { Match, Bet } from "@workspace/api-client-react/src/generated/api.schemas";
 import { usePlaceBet } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { formatCurrency } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@workspace/replit-auth-web";
 import {
   Dialog,
   DialogContent,
@@ -36,6 +37,7 @@ interface MatchCardProps {
 
 export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
   const { toast } = useToast();
+  const { isAuthenticated, user, login } = useAuth();
   const queryClient = useQueryClient();
   const [betTeam, setBetTeam] = useState<string | null>(null);
   const [betAmount, setBetAmount] = useState<string>("");
@@ -272,6 +274,24 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
               </div>
             )}
           </div>
+        )}
+
+        {/* Guest / Pending CTA — only on upcoming, bettable matches */}
+        {!isFinished && !userBet && match.status === 'upcoming' && !matchTimeUp && !isApproved && (
+          !isAuthenticated ? (
+            <button
+              onClick={() => login()}
+              className="w-full py-3 px-4 rounded-xl font-bold flex items-center justify-center gap-2 bg-primary/10 border border-primary/30 text-primary hover:bg-primary/20 transition-all duration-200"
+            >
+              <LogIn className="h-4 w-4" />
+              Sign In to Bet
+            </button>
+          ) : (
+            <div className="w-full py-3 px-4 rounded-xl text-center text-sm font-semibold flex items-center justify-center gap-2 bg-secondary/50 border border-white/10 text-muted-foreground cursor-default">
+              <Clock className="h-4 w-4" />
+              {user?.status === 'pending' ? 'Awaiting Admin Approval' : 'Access Required to Bet'}
+            </div>
+          )
         )}
 
         {/* Place Bet button */}

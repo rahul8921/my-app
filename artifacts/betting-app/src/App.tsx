@@ -10,7 +10,6 @@ import Login from "@/pages/Login";
 import Matches from "@/pages/Matches";
 import MyBets from "@/pages/MyBets";
 import Admin from "@/pages/Admin";
-import Pending from "@/pages/Pending";
 import Leaderboard from "@/pages/Leaderboard";
 import NotFound from "@/pages/not-found";
 
@@ -32,42 +31,59 @@ function LoadingScreen() {
   );
 }
 
-function ProtectedRoute({ component: Component, requireApproved = false }: { component: any, requireApproved?: boolean }) {
-  const { isAuthenticated, isLoading, user } = useAuth();
-
-  if (isLoading) return <LoadingScreen />;
-  if (!isAuthenticated) return <Login />;
-  
-  if (user?.status === 'rejected') return <Pending />;
-  if (requireApproved && user?.status === 'pending') return <Pending />;
-
+function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <Navbar />
-      <main className="flex-1">
-        <Component />
-      </main>
+      <main className="flex-1">{children}</main>
     </div>
   );
+}
+
+function PublicRoute({ component: Component }: { component: React.ComponentType }) {
+  const { isLoading } = useAuth();
+  if (isLoading) return <LoadingScreen />;
+  return <AppShell><Component /></AppShell>;
+}
+
+function RequiresLoginRoute({ component: Component }: { component: React.ComponentType }) {
+  const { isAuthenticated, isLoading } = useAuth();
+  if (isLoading) return <LoadingScreen />;
+  if (!isAuthenticated) return <Login />;
+  return <AppShell><Component /></AppShell>;
+}
+
+function AdminRoute({ component: Component }: { component: React.ComponentType }) {
+  const { isAuthenticated, isLoading, user } = useAuth();
+  if (isLoading) return <LoadingScreen />;
+  if (!isAuthenticated) return <Login />;
+  if (!user?.isAdmin) {
+    return (
+      <AppShell>
+        <div className="p-16 text-center text-red-400 font-semibold">Access Denied</div>
+      </AppShell>
+    );
+  }
+  return <AppShell><Component /></AppShell>;
 }
 
 function Router() {
   return (
     <Switch>
       <Route path="/">
-        {() => <ProtectedRoute component={Matches} requireApproved />}
+        {() => <PublicRoute component={Matches} />}
       </Route>
       <Route path="/matches">
-        {() => <ProtectedRoute component={Matches} requireApproved />}
-      </Route>
-      <Route path="/my-bets">
-        {() => <ProtectedRoute component={MyBets} requireApproved />}
-      </Route>
-      <Route path="/admin">
-        {() => <ProtectedRoute component={Admin} requireApproved />}
+        {() => <PublicRoute component={Matches} />}
       </Route>
       <Route path="/leaderboard">
-        {() => <ProtectedRoute component={Leaderboard} requireApproved />}
+        {() => <PublicRoute component={Leaderboard} />}
+      </Route>
+      <Route path="/my-bets">
+        {() => <RequiresLoginRoute component={MyBets} />}
+      </Route>
+      <Route path="/admin">
+        {() => <AdminRoute component={Admin} />}
       </Route>
       <Route component={NotFound} />
     </Switch>

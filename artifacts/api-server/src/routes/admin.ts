@@ -99,11 +99,6 @@ async function getUserWithStats(userId: string) {
 }
 
 router.get("/leaderboard", async (req: Request, res: Response) => {
-  if (!req.isAuthenticated()) {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
-  }
-
   const users = await db
     .select()
     .from(usersTable)
