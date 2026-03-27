@@ -2,7 +2,7 @@ import { Link } from "wouter";
 import { Navbar } from "@/components/Navbar";
 import { ArrowRight, Car, MapPin } from "lucide-react";
 import { motion } from "framer-motion";
-import { useAuth } from "@workspace/replit-auth-web";
+import { useRideAuth as useAuth } from "@/hooks/use-ride-auth";
 
 export default function Home() {
   const { isAuthenticated, login } = useAuth();

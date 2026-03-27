@@ -1,7 +1,7 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, useMap, Polyline } from 'react-leaflet';
 import L from 'leaflet';
-import { RideWithDetails } from '@workspace/api-client-react.schemas';
+import type { RideWithDetails } from '@/types';
 
 // --- Custom Icons ---
 const createDotIcon = (color: string, glowColor?: string) => {

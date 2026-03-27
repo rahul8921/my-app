@@ -1,8 +1,8 @@
 import { Navbar } from "@/components/Navbar";
-import { useListRideHistory } from "@workspace/api-client-react";
+import { useListRideHistory } from "@/lib/api";
 import { format } from "date-fns";
 import { formatCurrency, cn } from "@/lib/utils";
-import { MapPin, ArrowDownToLine, Clock, Star, Car } from "lucide-react";
+import { Star, Car, Clock } from "lucide-react";
 import { useLocation } from "wouter";
 
 export default function RideHistory() {
@@ -12,10 +12,10 @@ export default function RideHistory() {
   return (
     <div className="min-h-screen bg-background">
       <Navbar />
-      
+
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 pt-24 pb-12">
         <div className="flex items-center gap-4 mb-8">
-          <button 
+          <button
             onClick={() => setLocation(-1 as any)}
             className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center hover:bg-secondary/80 transition-colors"
           >
@@ -42,11 +42,9 @@ export default function RideHistory() {
           <div className="space-y-4">
             {rides?.map((ride) => (
               <div key={ride.id} className="bg-card border border-border rounded-2xl p-6 hover:shadow-lg transition-shadow flex flex-col md:flex-row gap-6">
-                
-                {/* Map Summary Visual */}
+
                 <div className="w-full md:w-48 h-32 bg-secondary rounded-xl flex flex-col justify-center px-4 relative overflow-hidden">
                   <div className="absolute left-6 top-8 bottom-8 w-0.5 bg-border z-0" />
-                  
                   <div className="flex items-center gap-3 relative z-10 mb-4">
                     <div className="w-3 h-3 rounded-full bg-foreground border-2 border-secondary" />
                     <div className="text-xs font-bold text-foreground truncate">{ride.pickupAddress}</div>
@@ -57,7 +55,6 @@ export default function RideHistory() {
                   </div>
                 </div>
 
-                {/* Details */}
                 <div className="flex-1 flex flex-col justify-between">
                   <div className="flex justify-between items-start mb-4">
                     <div>
@@ -67,11 +64,11 @@ export default function RideHistory() {
                       <div className="flex items-center gap-2 mt-1">
                         <span className={cn(
                           "text-xs font-bold px-2 py-1 rounded-md uppercase tracking-wider",
-                          ride.status === 'completed' ? "bg-green-100 text-green-700" :
-                          ride.status === 'cancelled' ? "bg-red-100 text-red-700" :
+                          ride.status === "completed" ? "bg-green-100 text-green-700" :
+                          ride.status === "cancelled" ? "bg-red-100 text-red-700" :
                           "bg-blue-100 text-blue-700"
                         )}>
-                          {ride.status.replace('_', ' ')}
+                          {ride.status.replace("_", " ")}
                         </span>
                         {ride.driver && (
                           <span className="text-sm font-medium text-muted-foreground">
@@ -87,18 +84,17 @@ export default function RideHistory() {
                     </div>
                   </div>
 
-                  {ride.status === 'completed' && ride.riderRating && (
+                  {ride.status === "completed" && ride.riderRating && (
                     <div className="flex items-center gap-1 text-accent">
                       {[...Array(5)].map((_, i) => (
-                        <Star 
-                          key={i} 
-                          className={cn("w-4 h-4", i < ride.riderRating! ? "fill-current" : "text-muted stroke-border")} 
+                        <Star
+                          key={i}
+                          className={cn("w-4 h-4", i < ride.riderRating! ? "fill-current" : "text-muted stroke-border")}
                         />
                       ))}
                     </div>
                   )}
                 </div>
-
               </div>
             ))}
           </div>

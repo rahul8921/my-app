@@ -2,7 +2,7 @@ import { Link, useLocation } from "wouter";
 import { User, Menu, X, CarFront, Navigation } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { useAuth } from "@workspace/replit-auth-web";
+import { useRideAuth as useAuth } from "@/hooks/use-ride-auth";
 
 export function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
