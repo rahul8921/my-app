@@ -6,47 +6,64 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
-import { Briefcase, Plus, Loader2, ArrowRight } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Briefcase, Plus, Loader2, ArrowRight, AlertCircle } from "lucide-react";
 import { format } from "date-fns";
-
-const createSchema = z.object({
-  name: z.string().min(2, "Name must be at least 2 characters"),
-  key: z.string().min(2, "Key must be at least 2 characters").max(10, "Key too long").toUpperCase(),
-  description: z.string().optional(),
-});
 
 export default function Projects() {
   const { data: projects, isLoading } = useProjects();
   const createMutation = useCreateProject();
   const [open, setOpen] = useState(false);
 
-  const form = useForm<z.infer<typeof createSchema>>({
-    resolver: zodResolver(createSchema),
-    defaultValues: { name: "", key: "", description: "" }
-  });
+  const [name, setName] = useState("");
+  const [key, setKey] = useState("");
+  const [keyTouched, setKeyTouched] = useState(false);
+  const [description, setDescription] = useState("");
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [mutationError, setMutationError] = useState<string | null>(null);
 
   const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const name = e.target.value;
-    form.setValue("name", name);
-    // auto-generate key: grab first letters of words, max 4 chars
-    if (!form.formState.dirtyFields.key) {
-      const generated = name.split(/\s+/).map(w => w[0]).join('').substring(0, 4).toUpperCase();
-      form.setValue("key", generated);
+    const val = e.target.value;
+    setName(val);
+    if (!keyTouched) {
+      const generated = val.split(/\s+/).filter(Boolean).map(w => w[0]).join("").slice(0, 4).toUpperCase();
+      setKey(generated);
     }
   };
 
-  const onSubmit = (values: z.infer<typeof createSchema>) => {
-    createMutation.mutate(values, {
-      onSuccess: () => {
-        setOpen(false);
-        form.reset();
+  const handleKeyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setKey(e.target.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 10));
+    setKeyTouched(true);
+  };
+
+  const validate = () => {
+    const errs: Record<string, string> = {};
+    if (name.trim().length < 2) errs.name = "Name must be at least 2 characters";
+    if (key.length < 2) errs.key = "Key must be at least 2 characters";
+    if (key.length > 10) errs.key = "Key must be at most 10 characters";
+    setErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setMutationError(null);
+    if (!validate()) return;
+    createMutation.mutate(
+      { name: name.trim(), key, description: description.trim() || undefined },
+      {
+        onSuccess: () => {
+          setOpen(false);
+          setName(""); setKey(""); setKeyTouched(false); setDescription(""); setErrors({});
+        },
+        onError: (err) => setMutationError(err.message),
       }
-    });
+    );
+  };
+
+  const handleOpenChange = (v: boolean) => {
+    setOpen(v);
+    if (!v) { setErrors({}); setMutationError(null); }
   };
 
   return (
@@ -61,7 +78,7 @@ export default function Projects() {
             <p className="text-muted-foreground mt-1">Manage your workspaces and boards</p>
           </div>
 
-          <Dialog open={open} onOpenChange={setOpen}>
+          <Dialog open={open} onOpenChange={handleOpenChange}>
             <DialogTrigger asChild>
               <Button size="lg" className="font-semibold shadow-lg shadow-primary/20">
                 <Plus className="w-5 h-5 mr-2" />
@@ -71,39 +88,58 @@ export default function Projects() {
             <DialogContent>
               <DialogHeader>
                 <DialogTitle>Create new project</DialogTitle>
+                <DialogDescription>Set up a new workspace for your team.</DialogDescription>
               </DialogHeader>
-              <Form {...form}>
-                <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 mt-4">
-                  <FormField control={form.control} name="name" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Project Name</FormLabel>
-                      <FormControl><Input placeholder="e.g. Website Redesign" {...field} onChange={(e) => { field.onChange(e); handleNameChange(e); }} /></FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-                  <FormField control={form.control} name="key" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Project Key</FormLabel>
-                      <FormControl><Input placeholder="WEB" {...field} className="uppercase" /></FormControl>
-                      <p className="text-[10px] text-muted-foreground">Used as prefix for issue IDs (e.g. WEB-123)</p>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-                  <FormField control={form.control} name="description" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Description</FormLabel>
-                      <FormControl><Textarea placeholder="Optional details about this project..." {...field} /></FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-                  <div className="flex justify-end pt-4">
-                    <Button type="submit" disabled={createMutation.isPending}>
-                      {createMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                      Create Project
-                    </Button>
+              <form onSubmit={handleSubmit} className="space-y-4 mt-2">
+                <div className="space-y-1.5">
+                  <label className="text-sm font-semibold text-foreground">Project Name</label>
+                  <Input
+                    value={name}
+                    onChange={handleNameChange}
+                    placeholder="e.g. Website Redesign"
+                  />
+                  {errors.name && <p className="text-xs text-destructive">{errors.name}</p>}
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-sm font-semibold text-foreground">Project Key</label>
+                  <Input
+                    value={key}
+                    onChange={handleKeyChange}
+                    placeholder="WEB"
+                    className="uppercase font-mono"
+                  />
+                  <p className="text-[10px] text-muted-foreground">Used as prefix for issue IDs (e.g. {key || "WEB"}-123)</p>
+                  {errors.key && <p className="text-xs text-destructive">{errors.key}</p>}
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-sm font-semibold text-foreground">Description <span className="text-muted-foreground font-normal">(optional)</span></label>
+                  <Textarea
+                    value={description}
+                    onChange={e => setDescription(e.target.value)}
+                    placeholder="What is this project about?"
+                    rows={3}
+                  />
+                </div>
+
+                {mutationError && (
+                  <div className="flex items-center gap-2 text-sm text-destructive bg-destructive/10 rounded-lg p-3">
+                    <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                    {mutationError}
                   </div>
-                </form>
-              </Form>
+                )}
+
+                <div className="flex justify-end gap-3 pt-2">
+                  <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={createMutation.isPending}>
+                    {createMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                    Create Project
+                  </Button>
+                </div>
+              </form>
             </DialogContent>
           </Dialog>
         </div>
@@ -119,7 +155,7 @@ export default function Projects() {
             </div>
             <h3 className="text-xl font-bold mb-2">No projects yet</h3>
             <p className="text-muted-foreground mb-6">Create your first project to start tracking work.</p>
-            <Button onClick={() => setOpen(true)}><Plus className="w-4 h-4 mr-2"/> Create Project</Button>
+            <Button onClick={() => setOpen(true)}><Plus className="w-4 h-4 mr-2" />Create Project</Button>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -131,7 +167,7 @@ export default function Projects() {
                       <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center font-bold text-lg font-mono">
                         {project.key.charAt(0)}
                       </div>
-                      <span className="text-xs font-mono bg-secondary px-2 py-1 rounded-md text-muted-foreground font-semibold">Key: {project.key}</span>
+                      <span className="text-xs font-mono bg-secondary px-2 py-1 rounded-md text-muted-foreground font-semibold">{project.key}</span>
                     </div>
                     <CardTitle className="text-xl mt-4 group-hover:text-primary transition-colors">{project.name}</CardTitle>
                     {project.description && (
@@ -139,10 +175,8 @@ export default function Projects() {
                     )}
                   </CardHeader>
                   <CardContent className="mt-auto pt-4 border-t border-border/50 flex justify-between items-center text-sm text-muted-foreground">
-                    <div className="font-medium">
-                      {project._count?.issues || 0} issues
-                    </div>
-                    <div className="flex items-center text-primary font-semibold opacity-0 group-hover:opacity-100 transition-opacity translate-x-[-10px] group-hover:translate-x-0">
+                    <div className="font-medium">{project.issueCount ?? 0} issues</div>
+                    <div className="flex items-center text-primary font-semibold opacity-0 group-hover:opacity-100 transition-opacity -translate-x-2 group-hover:translate-x-0 duration-200">
                       Open Board <ArrowRight className="w-4 h-4 ml-1" />
                     </div>
                   </CardContent>
