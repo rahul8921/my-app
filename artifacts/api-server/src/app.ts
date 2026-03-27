@@ -3,6 +3,7 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
 import router from "./routes";
+import jiraRouter from "./routes/jira";
 import { logger } from "./lib/logger";
 import { authMiddleware } from "./middlewares/authMiddleware";
 
@@ -34,5 +35,6 @@ app.use(express.urlencoded({ extended: true }));
 app.use(authMiddleware);
 
 app.use("/api", router);
+app.use("/jira-api", jiraRouter);
 
 export default app;

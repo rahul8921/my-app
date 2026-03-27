@@ -1,0 +1,15 @@
+packages:
+  "@dnd-kit/core": "Drag and drop functionality for Kanban board"
+  "@dnd-kit/sortable": "Sortable lists for Kanban columns"
+  "@dnd-kit/utilities": "Utilities for DND kit"
+  "date-fns": "Date formatting"
+  "framer-motion": "UI animations"
+  "zod": "Schema validation"
+  "react-hook-form": "Form handling"
+  "@hookform/resolvers": "Zod resolver for react-hook-form"
+
+images: []
+
+notes:
+  - "Jira-like standalone frontend"
+  - "All API calls directed to /jira-api/*"

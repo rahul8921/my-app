@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/jira-app/"
+title = "TaskFlow - Issue Tracker"
+version = "1.0.0"
+id = "artifacts/jira-app"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/jira-app/" ]
+localPort = 23763
+
+[services.development]
+run = "pnpm --filter @workspace/jira-app run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/jira-app", "run", "build" ]
+publicDir = "artifacts/jira-app/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "23763"
+BASE_PATH = "/jira-app/"
