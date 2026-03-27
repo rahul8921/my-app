@@ -27,7 +27,7 @@ export function useAuth() {
   }, []);
 
   const login = useCallback(() => {
-    const base = import.meta.env.BASE_URL?.replace(/\/+$/, "") || "/jira-app";
+    const base = import.meta.env.BASE_URL || "/jira-app/";
     window.location.href = `/api/login?returnTo=${encodeURIComponent(base)}`;
   }, []);
 
