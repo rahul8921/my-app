@@ -267,6 +267,10 @@ router.patch("/matches/:matchId/result", async (req: Request, res: Response) => 
 
   const matchId = paramsParsed.data.matchId;
   const { winner, status } = bodyParsed.data;
+  // score is an optional extra field not in the generated schema
+  const score = typeof req.body.score === "string" && req.body.score.trim()
+    ? req.body.score.trim()
+    : undefined;
 
   const [existing] = await db
     .select()
@@ -283,6 +287,7 @@ router.patch("/matches/:matchId/result", async (req: Request, res: Response) => 
     .set({
       status,
       winner: winner ?? null,
+      ...(score !== undefined ? { score } : {}),
       updatedAt: new Date(),
     })
     .where(eq(matchesTable.id, matchId))

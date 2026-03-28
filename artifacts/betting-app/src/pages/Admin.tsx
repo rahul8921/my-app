@@ -80,6 +80,8 @@ export default function Admin() {
   const [fixingTimes, setFixingTimes] = useState(false);
   const [editMatchId, setEditMatchId] = useState<number | null>(null);
   const [editMatchDate, setEditMatchDate] = useState("");
+  // per-match score text for manual result entry
+  const [matchScores, setMatchScores] = useState<Record<number, string>>({});
 
   const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -119,6 +121,25 @@ export default function Admin() {
       setEditMatchDate("");
     } catch (err: any) {
       toast({ variant: "destructive", title: "Update failed", description: err.message });
+    }
+  }
+
+  async function handleSetResult(matchId: number, winner: string | null, score?: string) {
+    try {
+      const res = await fetch(`${BASE}/api/matches/${matchId}/result`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "finished", winner, ...(score ? { score } : {}) }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to set result");
+      toast({ title: "Result updated successfully" });
+      queryClient.invalidateQueries({ queryKey: ['/api/matches'] });
+      // Clear the score input for this match
+      setMatchScores(prev => { const next = { ...prev }; delete next[matchId]; return next; });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Error", description: err.message });
     }
   }
 
@@ -373,25 +394,35 @@ export default function Admin() {
 
                 <div className="space-y-3">
                   <p className="text-sm font-medium text-center text-muted-foreground mb-2">Conclude Match</p>
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">Final Score / Result <span className="text-primary/60">(optional)</span></label>
+                    <input
+                      type="text"
+                      placeholder={`e.g. ${match.team1}: 172/4  •  ${match.team2}: 168/8`}
+                      value={matchScores[match.id] ?? ""}
+                      onChange={e => setMatchScores(prev => ({ ...prev, [match.id]: e.target.value }))}
+                      className="w-full px-3 py-2 rounded-lg bg-background border border-white/10 text-white text-sm focus:outline-none focus:border-primary mb-2"
+                    />
+                  </div>
                   <div className="grid grid-cols-2 gap-3">
                     <button
-                      onClick={() => setMatchResult.mutate({ matchId: match.id, data: { status: 'finished', winner: match.team1 } })}
+                      onClick={() => handleSetResult(match.id, match.team1, matchScores[match.id])}
                       className="py-2 px-3 rounded-lg border border-white/10 hover:border-primary hover:bg-primary/10 transition-colors text-sm font-semibold"
                     >
                       {match.team1} Won
                     </button>
                     <button
-                      onClick={() => setMatchResult.mutate({ matchId: match.id, data: { status: 'finished', winner: match.team2 } })}
+                      onClick={() => handleSetResult(match.id, match.team2, matchScores[match.id])}
                       className="py-2 px-3 rounded-lg border border-white/10 hover:border-primary hover:bg-primary/10 transition-colors text-sm font-semibold"
                     >
                       {match.team2} Won
                     </button>
                   </div>
                   <button
-                      onClick={() => setMatchResult.mutate({ matchId: match.id, data: { status: 'finished', winner: null } })}
-                      className="w-full py-2 px-3 rounded-lg border border-white/10 hover:border-white/30 hover:bg-secondary transition-colors text-sm font-semibold mt-2"
-                    >
-                      Draw / Cancel
+                    onClick={() => handleSetResult(match.id, null, matchScores[match.id])}
+                    className="w-full py-2 px-3 rounded-lg border border-white/10 hover:border-white/30 hover:bg-secondary transition-colors text-sm font-semibold mt-2"
+                  >
+                    Draw / Cancel
                   </button>
                 </div>
               </div>

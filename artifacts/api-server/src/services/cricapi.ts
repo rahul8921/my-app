@@ -56,13 +56,29 @@ interface CricApiMatch {
   matchEnded?: boolean;
 }
 
-async function fetchCurrentMatches(apiKey: string): Promise<CricApiMatch[]> {
-  const url = `${CRICAPI_BASE}/currentMatches?apikey=${apiKey}&offset=0`;
+async function fetchFromEndpoint(url: string): Promise<CricApiMatch[]> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`CricAPI HTTP ${res.status}`);
   const data = await res.json() as { status: string; data?: CricApiMatch[] };
-  if (data.status !== "success") throw new Error(`CricAPI status: ${data.status}`);
+  if (data.status !== "success") return [];
   return data.data ?? [];
+}
+
+async function fetchCurrentMatches(apiKey: string): Promise<CricApiMatch[]> {
+  // Try both endpoints and merge unique results — currentMatches shows live/recent,
+  // matches shows upcoming + recently completed
+  const [current, all] = await Promise.allSettled([
+    fetchFromEndpoint(`${CRICAPI_BASE}/currentMatches?apikey=${apiKey}&offset=0`),
+    fetchFromEndpoint(`${CRICAPI_BASE}/matches?apikey=${apiKey}&offset=0`),
+  ]);
+
+  const combined = new Map<string, CricApiMatch>();
+  for (const r of [current, all]) {
+    if (r.status === "fulfilled") {
+      for (const m of r.value) combined.set(m.id, m);
+    }
+  }
+  return Array.from(combined.values());
 }
 
 function buildScoreString(scores: CricApiScore[] | undefined): string {
@@ -131,6 +147,8 @@ export async function syncMatchesNow(force = false): Promise<void> {
   try {
     logger.info("CricAPI: syncing match results…");
     const apiMatches = await fetchCurrentMatches(apiKey);
+
+    logger.info({ count: apiMatches.length }, "CricAPI: raw matches from API");
 
     // Sync all non-finished matches (upcoming + live), plus any finished ones that haven't been settled
     const dbMatches = await db
