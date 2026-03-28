@@ -1,11 +1,14 @@
+import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@workspace/replit-auth-web";
 import { Crown, LayoutDashboard, Ticket, Trophy, LogOut, BarChart2, LogIn } from "lucide-react";
 import { motion } from "framer-motion";
+import { ProfilePhotoDialog } from "@/components/ProfilePhotoDialog";
 
 export function Navbar() {
   const [location] = useLocation();
   const { user, isAuthenticated, logout, login } = useAuth();
+  const [photoDialogOpen, setPhotoDialogOpen] = useState(false);
 
   const publicLinks = [
     { href: "/matches", label: "Matches", icon: Trophy },
@@ -60,21 +63,30 @@ export function Navbar() {
         <div className="flex items-center gap-4">
           {isAuthenticated && user ? (
             <>
-              <div className="hidden sm:flex items-center gap-3">
-                {user.profileImage ? (
-                  <img src={user.profileImage} alt={user.username} className="h-8 w-8 rounded-full ring-2 ring-white/10 object-cover" />
-                ) : (
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-secondary text-sm font-bold text-white ring-2 ring-white/10">
-                    {user.username?.[0]?.toUpperCase() || 'U'}
+              <button
+                onClick={() => setPhotoDialogOpen(true)}
+                className="hidden sm:flex items-center gap-3 group"
+                title="Change profile photo"
+              >
+                <div className="relative">
+                  {user.profileImage ? (
+                    <img src={user.profileImage} alt={user.username} className="h-8 w-8 rounded-full ring-2 ring-white/10 object-cover group-hover:ring-primary/60 transition-all" />
+                  ) : (
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-secondary text-sm font-bold text-white ring-2 ring-white/10 group-hover:ring-primary/60 transition-all">
+                      {user.username?.[0]?.toUpperCase() || 'U'}
+                    </div>
+                  )}
+                  <div className="absolute inset-0 rounded-full bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    <span className="text-[8px] text-white font-bold leading-none">EDIT</span>
                   </div>
-                )}
-                <div className="flex flex-col">
+                </div>
+                <div className="flex flex-col text-left">
                   <span className="text-sm font-semibold text-white leading-none">{user.username}</span>
                   <span className="text-xs text-muted-foreground mt-1 leading-none capitalize">
                     {user.isAdmin ? 'Admin' : user.status}
                   </span>
                 </div>
-              </div>
+              </button>
               <button
                 onClick={() => logout()}
                 className="flex items-center justify-center h-9 w-9 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
@@ -94,6 +106,15 @@ export function Navbar() {
           )}
         </div>
       </div>
+
+      {isAuthenticated && user && (
+        <ProfilePhotoDialog
+          open={photoDialogOpen}
+          onClose={() => setPhotoDialogOpen(false)}
+          currentPhoto={user.profileImage}
+          username={user.username}
+        />
+      )}
 
       {/* Mobile nav */}
       <div className="flex md:hidden border-t border-white/5 bg-card/50 overflow-x-auto">

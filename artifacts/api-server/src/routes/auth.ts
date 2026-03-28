@@ -117,7 +117,7 @@ router.get("/auth/user", async (req: Request, res: Response) => {
         username: dbUser.username ?? undefined,
         firstName: dbUser.firstName ?? undefined,
         lastName: dbUser.lastName ?? undefined,
-        profileImage: dbUser.profileImageUrl ?? undefined,
+        profileImage: dbUser.customAvatarUrl ?? dbUser.profileImageUrl ?? undefined,
         isAdmin: dbUser.isAdmin,
         status: dbUser.status,
       },
@@ -210,7 +210,7 @@ router.get("/callback", async (req: Request, res: Response) => {
       username: dbUser.username ?? undefined,
       firstName: dbUser.firstName ?? undefined,
       lastName: dbUser.lastName ?? undefined,
-      profileImage: dbUser.profileImageUrl ?? undefined,
+      profileImage: dbUser.customAvatarUrl ?? dbUser.profileImageUrl ?? undefined,
       isAdmin: dbUser.isAdmin,
       status: dbUser.status,
     },
@@ -222,6 +222,27 @@ router.get("/callback", async (req: Request, res: Response) => {
   const sid = await createSession(sessionData);
   setSessionCookie(res, sid);
   res.redirect(returnTo);
+});
+
+router.patch("/me/photo", async (req: Request, res: Response) => {
+  if (!req.isAuthenticated()) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const { imageData } = req.body as { imageData?: string };
+  if (!imageData || !imageData.startsWith("data:image/")) {
+    res.status(400).json({ error: "Invalid image data" });
+    return;
+  }
+  if (imageData.length > 700000) {
+    res.status(400).json({ error: "Image too large. Please use a smaller photo." });
+    return;
+  }
+  await db
+    .update(usersTable)
+    .set({ customAvatarUrl: imageData })
+    .where(eq(usersTable.id, req.user.id));
+  res.json({ success: true, profileImage: imageData });
 });
 
 router.get("/logout", async (req: Request, res: Response) => {
@@ -287,7 +308,7 @@ router.post(
           username: dbUser.username ?? undefined,
           firstName: dbUser.firstName ?? undefined,
           lastName: dbUser.lastName ?? undefined,
-          profileImage: dbUser.profileImageUrl ?? undefined,
+          profileImage: dbUser.customAvatarUrl ?? dbUser.profileImageUrl ?? undefined,
           isAdmin: dbUser.isAdmin,
           status: dbUser.status,
         },

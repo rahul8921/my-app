@@ -88,7 +88,7 @@ async function getUserWithStats(userId: string) {
     username: user.username ?? undefined,
     firstName: user.firstName ?? undefined,
     lastName: user.lastName ?? undefined,
-    profileImage: user.profileImageUrl ?? undefined,
+    profileImage: user.customAvatarUrl ?? user.profileImageUrl ?? undefined,
     isAdmin: user.isAdmin,
     status: user.status,
     totalBetAmount,
@@ -129,7 +129,7 @@ router.get("/leaderboard", async (req: Request, res: Response) => {
       return {
         id: user.id,
         username: user.username ?? "Unknown",
-        profileImage: user.profileImageUrl ?? undefined,
+        profileImage: user.customAvatarUrl ?? user.profileImageUrl ?? undefined,
         totalBetAmount,
         totalWon,
         netBalance,
