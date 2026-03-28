@@ -4,6 +4,9 @@ import { logger } from "../lib/logger";
 
 const CRICAPI_BASE = "https://api.cricapi.com/v1";
 
+// IPL 2026 series ID on CricAPI
+const IPL_2026_SERIES_ID = "87c62aac-bc3c-4738-ab93-19da0690488f";
+
 const IPL_KEYWORDS: Record<string, string[]> = {
   RCB: ["royal challengers", "rcb", "bengaluru", "bangalore"],
   SRH: ["sunrisers", "srh", "hyderabad"],
@@ -47,7 +50,7 @@ interface CricApiMatch {
   name: string;
   matchType: string;
   status: string;
-  venue: string;
+  venue?: string;
   date: string;
   dateTimeGMT: string;
   teams: string[];
@@ -56,31 +59,45 @@ interface CricApiMatch {
   matchEnded?: boolean;
 }
 
-async function fetchFromEndpoint(url: string): Promise<CricApiMatch[]> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`CricAPI HTTP ${res.status}`);
-  const data = await res.json() as { status: string; data?: CricApiMatch[] };
-  if (data.status !== "success") return [];
-  return data.data ?? [];
-}
+// ── Series match list cache ──────────────────────────────────────────────────
+// Cached list of all IPL 2026 matches from series_info
+let seriesMatchCache: CricApiMatch[] = [];
+let seriesCacheTime = 0;
+const SERIES_CACHE_TTL = 6 * 60 * 60 * 1000; // 6 hours
 
-async function fetchCurrentMatches(apiKey: string): Promise<CricApiMatch[]> {
-  // Try both endpoints and merge unique results — currentMatches shows live/recent,
-  // matches shows upcoming + recently completed
-  const [current, all] = await Promise.allSettled([
-    fetchFromEndpoint(`${CRICAPI_BASE}/currentMatches?apikey=${apiKey}&offset=0`),
-    fetchFromEndpoint(`${CRICAPI_BASE}/matches?apikey=${apiKey}&offset=0`),
-  ]);
-
-  const combined = new Map<string, CricApiMatch>();
-  for (const r of [current, all]) {
-    if (r.status === "fulfilled") {
-      for (const m of r.value) combined.set(m.id, m);
-    }
+async function fetchSeriesMatches(apiKey: string): Promise<CricApiMatch[]> {
+  const now = Date.now();
+  if (seriesMatchCache.length > 0 && now - seriesCacheTime < SERIES_CACHE_TTL) {
+    return seriesMatchCache;
   }
-  return Array.from(combined.values());
+
+  const url = `${CRICAPI_BASE}/series_info?apikey=${apiKey}&id=${IPL_2026_SERIES_ID}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`CricAPI series_info HTTP ${res.status}`);
+  const data = await res.json() as { status: string; data?: { matchList?: CricApiMatch[] } };
+  if (data.status !== "success" || !data.data) throw new Error("CricAPI series_info failed");
+
+  seriesMatchCache = data.data.matchList ?? [];
+  seriesCacheTime = now;
+  logger.info({ count: seriesMatchCache.length }, "CricAPI: loaded IPL 2026 series match list");
+  return seriesMatchCache;
 }
 
+// ── Individual match info ────────────────────────────────────────────────────
+async function fetchMatchInfo(apiKey: string, matchId: string): Promise<CricApiMatch | null> {
+  try {
+    const url = `${CRICAPI_BASE}/match_info?apikey=${apiKey}&id=${matchId}`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json() as { status: string; data?: CricApiMatch };
+    if (data.status !== "success" || !data.data) return null;
+    return data.data;
+  } catch {
+    return null;
+  }
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
 function buildScoreString(scores: CricApiScore[] | undefined): string {
   if (!scores || scores.length === 0) return "";
   return scores
@@ -122,13 +139,12 @@ async function settleMatchBets(matchId: number, winner: string): Promise<void> {
         .where(eq(betsTable.id, bet.id));
     }
   }
-
   logger.info(`CricAPI: settled ${pending.length} bets for match ${matchId} — winner: ${winner}`);
 }
 
-// In-memory throttle: only call CricAPI at most once every 2 minutes
-let lastPollTime = 0;
-const POLL_COOLDOWN_MS = 2 * 60 * 1000;
+// ── Main sync with cooldown ──────────────────────────────────────────────────
+let lastSyncTime = 0;
+const SYNC_COOLDOWN_MS = 2 * 60 * 1000; // 2 minutes
 
 export async function syncMatchesNow(force = false): Promise<void> {
   const apiKey = process.env["CRICAPI_KEY"];
@@ -138,43 +154,54 @@ export async function syncMatchesNow(force = false): Promise<void> {
   }
 
   const now = Date.now();
-  if (!force && now - lastPollTime < POLL_COOLDOWN_MS) {
-    logger.debug(`CricAPI: sync skipped (last sync was ${Math.round((now - lastPollTime) / 1000)}s ago)`);
+  if (!force && now - lastSyncTime < SYNC_COOLDOWN_MS) {
     return;
   }
-  lastPollTime = now;
+  lastSyncTime = now;
 
   try {
-    logger.info("CricAPI: syncing match results…");
-    const apiMatches = await fetchCurrentMatches(apiKey);
+    logger.info("CricAPI: syncing match results via series_info + match_info…");
 
-    logger.info({ count: apiMatches.length }, "CricAPI: raw matches from API");
+    // Step 1: Get all IPL 2026 match IDs from series_info (cached 6h)
+    const seriesMatches = await fetchSeriesMatches(apiKey);
 
-    // Sync all non-finished matches (upcoming + live), plus any finished ones that haven't been settled
+    // Step 2: Get active DB matches
     const dbMatches = await db
       .select()
       .from(matchesTable)
       .where(or(eq(matchesTable.status, "upcoming"), eq(matchesTable.status, "live")));
 
-    let updated = 0;
+    if (dbMatches.length === 0) {
+      logger.info("CricAPI: no active matches to sync");
+      return;
+    }
 
+    // Step 3: For each DB match, find corresponding CricAPI match ID
+    let updated = 0;
     for (const dbMatch of dbMatches) {
       const matchTimestamp = new Date(dbMatch.matchDate).getTime();
 
-      const apiMatch = apiMatches.find(am => {
-        if (!am.teams || am.teams.length < 2) return false;
-        const apiTimestamp = new Date(am.dateTimeGMT || am.date).getTime();
-        if (Math.abs(matchTimestamp - apiTimestamp) > 36 * 60 * 60 * 1000) return false;
+      // Find best matching series match (by teams + date within 48h)
+      const seriesMatch = seriesMatches.find(sm => {
+        if (!sm.teams || sm.teams.length < 2) return false;
+        const apiTs = new Date(sm.dateTimeGMT || sm.date).getTime();
+        if (Math.abs(matchTimestamp - apiTs) > 48 * 60 * 60 * 1000) return false;
         return (
-          (teamNamesMatch(dbMatch.team1, am.teams[0]) && teamNamesMatch(dbMatch.team2, am.teams[1])) ||
-          (teamNamesMatch(dbMatch.team1, am.teams[1]) && teamNamesMatch(dbMatch.team2, am.teams[0]))
+          (teamNamesMatch(dbMatch.team1, sm.teams[0]) && teamNamesMatch(dbMatch.team2, sm.teams[1])) ||
+          (teamNamesMatch(dbMatch.team1, sm.teams[1]) && teamNamesMatch(dbMatch.team2, sm.teams[0]))
         );
       });
 
-      if (!apiMatch) continue;
+      if (!seriesMatch) {
+        logger.debug(`CricAPI: no series match found for ${dbMatch.team1} vs ${dbMatch.team2}`);
+        continue;
+      }
+
+      // Step 4: Fetch live match_info for this specific match ID
+      const matchInfo = await fetchMatchInfo(apiKey, seriesMatch.id);
+      const apiMatch = matchInfo ?? seriesMatch; // fall back to series data if match_info fails
 
       const updates: Record<string, unknown> = {};
-
       const scoreStr = buildScoreString(apiMatch.score);
       if (scoreStr) updates["score"] = scoreStr;
 
@@ -188,8 +215,8 @@ export async function syncMatchesNow(force = false): Promise<void> {
             await settleMatchBets(dbMatch.id, dbWinner);
           }
         }
-        // Store the result text as score for completed matches if no score data
-        if (!scoreStr && apiMatch.status) {
+        // If no score from array but status has result text, store that
+        if (!scoreStr && apiMatch.status && apiMatch.status.toLowerCase().includes("won")) {
           updates["score"] = apiMatch.status;
         }
       } else if (apiMatch.matchStarted) {
@@ -204,10 +231,12 @@ export async function syncMatchesNow(force = false): Promise<void> {
           `CricAPI: updated match ${dbMatch.id} (${dbMatch.team1} vs ${dbMatch.team2}) → ${JSON.stringify(updates)}`
         );
         updated++;
+      } else {
+        logger.debug(`CricAPI: no changes for ${dbMatch.team1} vs ${dbMatch.team2} (matchEnded=${apiMatch.matchEnded}, status="${apiMatch.status}")`);
       }
     }
 
-    logger.info(`CricAPI: sync complete — ${updated} match(es) updated out of ${dbMatches.length} tracked`);
+    logger.info(`CricAPI: sync complete — ${updated}/${dbMatches.length} match(es) updated`);
   } catch (err) {
     logger.error({ err }, "CricAPI: sync failed");
   }
