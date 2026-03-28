@@ -136,7 +136,7 @@ export default function Leaderboard() {
                       {isTop ? (
                         <span className="text-2xl" title="Top player">👑</span>
                       ) : isBottom ? (
-                        <span className="text-2xl" title="Lowest player">💀</span>
+                        <span className="text-2xl" title="Lowest player">🫏</span>
                       ) : (
                         <span className="text-lg font-bold text-muted-foreground">
                           #{index + 1}
