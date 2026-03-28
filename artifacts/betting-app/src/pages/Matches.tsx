@@ -1,17 +1,19 @@
 import { useAuth } from "@workspace/replit-auth-web";
 import { useListMatches, useListMyBets } from "@workspace/api-client-react";
 import { MatchCard } from "@/components/MatchCard";
-import { Trophy, Activity, History } from "lucide-react";
+import { Trophy, Activity, History, RefreshCw } from "lucide-react";
 import { motion } from "framer-motion";
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
 type Filter = "all" | "live" | "upcoming" | "finished";
 
 export default function Matches() {
   const { user } = useAuth();
-  const { data: matches, isLoading: isLoadingMatches } = useListMatches({
-    query: { refetchInterval: 30_000 }
-  });
+  const queryClient = useQueryClient();
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const { data: matches, isLoading: isLoadingMatches } = useListMatches();
   const { data: bets } = useListMyBets({
     query: { enabled: user?.status === 'approved' }
   });
@@ -19,6 +21,13 @@ export default function Matches() {
   const [filter, setFilter] = useState<Filter>("all");
 
   const isApproved = user?.status === 'approved';
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await queryClient.invalidateQueries({ queryKey: ['/api/matches'] });
+    await queryClient.refetchQueries({ queryKey: ['/api/matches'] });
+    setIsRefreshing(false);
+  };
 
   if (isLoadingMatches) {
     return (
@@ -36,7 +45,7 @@ export default function Matches() {
   const statusOrder = (status: string) => {
     if (status === "live") return 0;
     if (status === "upcoming") return 1;
-    return 2; // finished/completed
+    return 2;
   };
 
   const filteredMatches = (matches?.filter(m => filter === "all" || m.status === filter) || [])
@@ -46,7 +55,6 @@ export default function Matches() {
       if (orderDiff !== 0) return orderDiff;
       const aTime = new Date(a.matchDate).getTime();
       const bTime = new Date(b.matchDate).getTime();
-      // upcoming & live: soonest first; finished: most recent first
       return a.status === "finished" ? bTime - aTime : aTime - bTime;
     });
 
@@ -62,26 +70,39 @@ export default function Matches() {
           </p>
         </div>
 
-        <div className="flex bg-secondary p-1 rounded-xl shadow-inner border border-white/5 overflow-x-auto">
-          {[
-            { id: "all", label: "All Matches", icon: Trophy },
-            { id: "live", label: "Live", icon: Activity },
-            { id: "upcoming", label: "Upcoming", icon: Trophy },
-            { id: "finished", label: "Finished", icon: History },
-          ].map((f) => (
-            <button
-              key={f.id}
-              onClick={() => setFilter(f.id as Filter)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
-                filter === f.id 
-                  ? 'bg-card text-primary shadow-sm border border-white/5' 
-                  : 'text-muted-foreground hover:text-white hover:bg-white/5'
-              }`}
-            >
-              <f.icon className="h-4 w-4" />
-              <span className="whitespace-nowrap">{f.label}</span>
-            </button>
-          ))}
+        <div className="flex flex-col sm:flex-row items-end gap-3">
+          {/* Refresh Button */}
+          <button
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-primary/10 border border-primary/30 text-primary hover:bg-primary/20 transition-all font-semibold text-sm disabled:opacity-50"
+          >
+            <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+            {isRefreshing ? 'Checking…' : 'Check Results'}
+          </button>
+
+          {/* Filter Tabs */}
+          <div className="flex bg-secondary p-1 rounded-xl shadow-inner border border-white/5 overflow-x-auto">
+            {[
+              { id: "all", label: "All Matches", icon: Trophy },
+              { id: "live", label: "Live", icon: Activity },
+              { id: "upcoming", label: "Upcoming", icon: Trophy },
+              { id: "finished", label: "Finished", icon: History },
+            ].map((f) => (
+              <button
+                key={f.id}
+                onClick={() => setFilter(f.id as Filter)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+                  filter === f.id 
+                    ? 'bg-card text-primary shadow-sm border border-white/5' 
+                    : 'text-muted-foreground hover:text-white hover:bg-white/5'
+                }`}
+              >
+                <f.icon className="h-4 w-4" />
+                <span className="whitespace-nowrap">{f.label}</span>
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 

@@ -332,11 +332,26 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
           })()}
         </div>
 
-        {/* Live Score */}
+        {/* Score / Final Result */}
         {match.score && (
-          <div className="bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-2.5 text-center">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-red-400 mb-1">Live Score</p>
+          <div className={`rounded-xl px-4 py-2.5 text-center border ${
+            isFinished
+              ? 'bg-yellow-500/10 border-yellow-500/25'
+              : 'bg-red-500/10 border-red-500/20'
+          }`}>
+            <p className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${
+              isFinished ? 'text-yellow-400' : 'text-red-400'
+            }`}>
+              {isFinished ? '🏆 Final Result' : '🔴 Live Score'}
+            </p>
             <p className="text-sm font-mono font-semibold text-white leading-relaxed">{match.score}</p>
+          </div>
+        )}
+        {/* Winner banner for finished matches with no score text */}
+        {isFinished && !match.score && match.winner && (
+          <div className="bg-yellow-500/10 border border-yellow-500/25 rounded-xl px-4 py-2.5 text-center">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-yellow-400 mb-1">🏆 Match Winner</p>
+            <p className="text-sm font-bold text-yellow-300">{match.winner} won!</p>
           </div>
         )}
 

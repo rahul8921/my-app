@@ -4,8 +4,6 @@ import { logger } from "../lib/logger";
 
 const CRICAPI_BASE = "https://api.cricapi.com/v1";
 
-// Full IPL team name keywords → used to match both short codes (RCB, SRH)
-// and full names that admins might enter
 const IPL_KEYWORDS: Record<string, string[]> = {
   RCB: ["royal challengers", "rcb", "bengaluru", "bangalore"],
   SRH: ["sunrisers", "srh", "hyderabad"],
@@ -112,17 +110,29 @@ async function settleMatchBets(matchId: number, winner: string): Promise<void> {
   logger.info(`CricAPI: settled ${pending.length} bets for match ${matchId} — winner: ${winner}`);
 }
 
-export async function pollCricApi(): Promise<void> {
+// In-memory throttle: only call CricAPI at most once every 2 minutes
+let lastPollTime = 0;
+const POLL_COOLDOWN_MS = 2 * 60 * 1000;
+
+export async function syncMatchesNow(force = false): Promise<void> {
   const apiKey = process.env["CRICAPI_KEY"];
   if (!apiKey) {
-    logger.warn("CRICAPI_KEY not set — skipping CricAPI poll");
+    logger.warn("CRICAPI_KEY not set — skipping CricAPI sync");
     return;
   }
 
+  const now = Date.now();
+  if (!force && now - lastPollTime < POLL_COOLDOWN_MS) {
+    logger.debug(`CricAPI: sync skipped (last sync was ${Math.round((now - lastPollTime) / 1000)}s ago)`);
+    return;
+  }
+  lastPollTime = now;
+
   try {
-    logger.info("CricAPI: polling for live match updates…");
+    logger.info("CricAPI: syncing match results…");
     const apiMatches = await fetchCurrentMatches(apiKey);
 
+    // Sync all non-finished matches (upcoming + live), plus any finished ones that haven't been settled
     const dbMatches = await db
       .select()
       .from(matchesTable)
@@ -135,7 +145,6 @@ export async function pollCricApi(): Promise<void> {
 
       const apiMatch = apiMatches.find(am => {
         if (!am.teams || am.teams.length < 2) return false;
-        // Allow ±36 hours around the match date so we catch late-start matches
         const apiTimestamp = new Date(am.dateTimeGMT || am.date).getTime();
         if (Math.abs(matchTimestamp - apiTimestamp) > 36 * 60 * 60 * 1000) return false;
         return (
@@ -157,10 +166,13 @@ export async function pollCricApi(): Promise<void> {
         if (apiWinner) {
           const dbWinner = teamNamesMatch(dbMatch.team1, apiWinner) ? dbMatch.team1 : dbMatch.team2;
           updates["winner"] = dbWinner;
-          // Only settle if not already settled
           if (dbMatch.winner !== dbWinner) {
             await settleMatchBets(dbMatch.id, dbWinner);
           }
+        }
+        // Store the result text as score for completed matches if no score data
+        if (!scoreStr && apiMatch.status) {
+          updates["score"] = apiMatch.status;
         }
       } else if (apiMatch.matchStarted) {
         updates["status"] = "live";
@@ -177,29 +189,8 @@ export async function pollCricApi(): Promise<void> {
       }
     }
 
-    logger.info(`CricAPI: poll complete — ${updated} match(es) updated out of ${dbMatches.length} tracked`);
+    logger.info(`CricAPI: sync complete — ${updated} match(es) updated out of ${dbMatches.length} tracked`);
   } catch (err) {
-    logger.error({ err }, "CricAPI: poll failed");
+    logger.error({ err }, "CricAPI: sync failed");
   }
-}
-
-export function startCricApiPolling(): void {
-  const apiKey = process.env["CRICAPI_KEY"];
-  if (!apiKey) {
-    logger.warn(
-      "CRICAPI_KEY env var not set — live score sync is disabled. " +
-      "Add your free key from cricapi.com to enable it."
-    );
-    return;
-  }
-
-  logger.info("CricAPI: live score polling active (every 15 minutes)");
-
-  // Immediate first poll
-  pollCricApi().catch(err => logger.error({ err }, "CricAPI: initial poll failed"));
-
-  // Every 15 minutes = 96 calls/day (within free tier limit of 100)
-  setInterval(() => {
-    pollCricApi().catch(err => logger.error({ err }, "CricAPI: scheduled poll failed"));
-  }, 15 * 60 * 1000);
 }

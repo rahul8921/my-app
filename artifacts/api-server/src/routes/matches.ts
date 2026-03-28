@@ -7,6 +7,7 @@ import {
   SetMatchResultParams,
   GetMatchParams,
 } from "@workspace/api-zod";
+import { syncMatchesNow } from "../services/cricapi";
 
 const router: IRouter = Router();
 
@@ -36,6 +37,10 @@ async function getMatchWithTotals(matchId: number) {
 }
 
 router.get("/matches", async (req: Request, res: Response) => {
+  // Sync with CricAPI on every request (throttled to once per 2 min internally)
+  // await so returned data is always fresh
+  await syncMatchesNow().catch(() => {});
+
   const matches = await db.select().from(matchesTable);
 
   const result = await Promise.all(
