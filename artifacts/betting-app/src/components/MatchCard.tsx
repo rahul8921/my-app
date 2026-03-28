@@ -221,7 +221,7 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
                     <div className="absolute -top-3 -right-3 text-2xl drop-shadow-[0_0_8px_rgba(245,158,11,0.8)]">👑</div>
                   )}
                   {isFinished && match.winner && match.winner !== match.team1 && (
-                    <div className="absolute -top-2 -right-2 text-xl opacity-50">💀</div>
+                    <div className="absolute -top-2 -right-2 text-xl opacity-50">🫏</div>
                   )}
                 </div>
                 <span className="font-display font-semibold text-lg text-center leading-tight" style={{ color: c1.text }}>{match.team1}</span>
@@ -292,7 +292,7 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
                     <div className="absolute -top-3 -right-3 text-2xl drop-shadow-[0_0_8px_rgba(245,158,11,0.8)]">👑</div>
                   )}
                   {isFinished && match.winner && match.winner !== match.team2 && (
-                    <div className="absolute -top-2 -right-2 text-xl opacity-50">💀</div>
+                    <div className="absolute -top-2 -right-2 text-xl opacity-50">🫏</div>
                   )}
                 </div>
                 <span className="font-display font-semibold text-lg text-center leading-tight" style={{ color: c2.text }}>{match.team2}</span>
