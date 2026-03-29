@@ -142,6 +142,33 @@ async function settleMatchBets(matchId: number, winner: string): Promise<void> {
   logger.info(`CricAPI: settled ${pending.length} bets for match ${matchId} — winner: ${winner}`);
 }
 
+// ── Local proxy (user's machine) ─────────────────────────────────────────────
+interface ProxyResult {
+  found: boolean;
+  status?: string;
+  winner?: string;
+  result?: string;
+  scores?: string[];
+  source?: string;
+}
+
+async function fetchFromLocalProxy(team1: string, team2: string): Promise<ProxyResult | null> {
+  const proxyUrl = process.env["CRICKET_PROXY_URL"];
+  if (!proxyUrl) return null;
+  try {
+    const url = `${proxyUrl.replace(/\/$/, "")}/score?team1=${encodeURIComponent(team1)}&team2=${encodeURIComponent(team2)}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return null;
+    const data = await res.json() as ProxyResult;
+    if (!data.found) return null;
+    logger.info({ team1, team2, data }, "LocalProxy: got score from local machine");
+    return data;
+  } catch (err) {
+    logger.warn({ err }, "LocalProxy: request failed, falling back to CricAPI");
+    return null;
+  }
+}
+
 // ── Main sync with cooldown ──────────────────────────────────────────────────
 let lastSyncTime = 0;
 const SYNC_COOLDOWN_MS = 2 * 60 * 1000; // 2 minutes
@@ -197,30 +224,46 @@ export async function syncMatchesNow(force = false): Promise<void> {
         continue;
       }
 
-      // Step 4: Fetch live match_info for this specific match ID
-      const matchInfo = await fetchMatchInfo(apiKey, seriesMatch.id);
-      const apiMatch = matchInfo ?? seriesMatch; // fall back to series data if match_info fails
+      // Step 4a: Try local proxy first (user's machine, residential IP)
+      const proxyResult = await fetchFromLocalProxy(dbMatch.team1, dbMatch.team2);
 
       const updates: Record<string, unknown> = {};
-      const scoreStr = buildScoreString(apiMatch.score);
-      if (scoreStr) updates["score"] = scoreStr;
 
-      if (apiMatch.matchEnded) {
+      if (proxyResult && proxyResult.status === "finished" && proxyResult.winner) {
+        // Proxy gave us a definitive result — use it
         updates["status"] = "finished";
-        const apiWinner = extractWinner(apiMatch.status, apiMatch.teams);
-        if (apiWinner) {
-          const dbWinner = teamNamesMatch(dbMatch.team1, apiWinner) ? dbMatch.team1 : dbMatch.team2;
-          updates["winner"] = dbWinner;
-          if (dbMatch.winner !== dbWinner) {
-            await settleMatchBets(dbMatch.id, dbWinner);
+        updates["winner"] = proxyResult.winner;
+        if (proxyResult.result) updates["score"] = proxyResult.result;
+        else if (proxyResult.scores && proxyResult.scores.length > 0)
+          updates["score"] = proxyResult.scores.join("  •  ");
+
+        if (dbMatch.winner !== proxyResult.winner) {
+          await settleMatchBets(dbMatch.id, proxyResult.winner);
+        }
+      } else {
+        // Step 4b: Fall back to CricAPI match_info
+        const matchInfo = await fetchMatchInfo(apiKey, seriesMatch.id);
+        const apiMatch = matchInfo ?? seriesMatch;
+
+        const scoreStr = buildScoreString(apiMatch.score);
+        if (scoreStr) updates["score"] = scoreStr;
+
+        if (apiMatch.matchEnded) {
+          updates["status"] = "finished";
+          const apiWinner = extractWinner(apiMatch.status, apiMatch.teams);
+          if (apiWinner) {
+            const dbWinner = teamNamesMatch(dbMatch.team1, apiWinner) ? dbMatch.team1 : dbMatch.team2;
+            updates["winner"] = dbWinner;
+            if (dbMatch.winner !== dbWinner) {
+              await settleMatchBets(dbMatch.id, dbWinner);
+            }
           }
+          if (!scoreStr && apiMatch.status && apiMatch.status.toLowerCase().includes("won")) {
+            updates["score"] = apiMatch.status;
+          }
+        } else if (proxyResult?.status === "live" || apiMatch.matchStarted) {
+          updates["status"] = "live";
         }
-        // If no score from array but status has result text, store that
-        if (!scoreStr && apiMatch.status && apiMatch.status.toLowerCase().includes("won")) {
-          updates["score"] = apiMatch.status;
-        }
-      } else if (apiMatch.matchStarted) {
-        updates["status"] = "live";
       }
 
       if (Object.keys(updates).length > 0) {
