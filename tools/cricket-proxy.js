@@ -85,33 +85,60 @@ function slugContainsTeam(slug, teamCode) {
 // ── Parse a match page for result ────────────────────────────────────────────
 function parseMatchPage(html, team1Code, team2Code) {
   // Scores — e.g. "183/4 (20 Ovs)"
-  const scoreRe  = /(\d{2,3}\/\d{1,2})\s*\([\d.]+\s*Ov/gi;
+  const scoreRe = /(\d{2,3}\/\d{1,2})\s*\([\d.]+\s*Ov/gi;
   const rawScores = [];
   let sm;
   while ((sm = scoreRe.exec(html)) !== null) rawScores.push(sm[1]);
 
-  const isLive = /\bLIVE\b/i.test(html) || html.includes("cb-font-live");
+  // Collect candidate result strings from multiple places on the page:
+  const candidates = [];
 
-  // Find ALL "X won by Y" mentions on the page
-  const resultRe = /([\w\s]+?)\s+won\s+by\s+([\d]+\s+(?:runs?|wickets?)(?:\s+\([^)]+\))?)/gi;
-  let match;
-  while ((match = resultRe.exec(html)) !== null) {
-    const winnerRaw  = match[1].trim();
-    const winnerCode = resolveTeamCode(winnerRaw);
-    // Only accept if winner resolves to one of our two teams
-    if (winnerCode === team1Code || winnerCode === team2Code) {
-      console.log(`  ✅ valid result found: ${winnerRaw} won by ${match[2].trim()}`);
-      return {
-        status: "finished",
-        winner: winnerCode,
-        result: `${winnerRaw} won by ${match[2].trim()}`,
-        scores: rawScores,
-      };
-    } else {
-      console.log(`  ⚠ skipping unrelated result: ${winnerRaw} (not ${team1Code} or ${team2Code})`);
+  // 1. Page title — e.g. "RCB Won By 6 Wickets - 1st Match Scorecard | Cricbuzz"
+  const titleM = html.match(/<title>([^<]*)<\/title>/i);
+  if (titleM) {
+    console.log(`  page title: ${titleM[1].trim()}`);
+    candidates.push(titleM[1]);
+  }
+
+  // 2. Green result strip — <div class="...cb-lv-grn-strip...">RCB Won By 6 Wickets</div>
+  const stripRe = /cb-lv-grn-strip[^>]*>([^<]{5,150})</gi;
+  let st;
+  while ((st = stripRe.exec(html)) !== null) {
+    console.log(`  strip: ${st[1].trim()}`);
+    candidates.push(st[1]);
+  }
+
+  // 3. Any span/div containing "won by" (broader sweep)
+  const tagRe = /<(?:span|div|p)[^>]*>([^<]{10,200}won by[^<]{5,100})<\/(?:span|div|p)>/gi;
+  let tg;
+  while ((tg = tagRe.exec(html)) !== null) candidates.push(tg[1]);
+
+  // 4. Raw text anywhere on page
+  candidates.push(html);
+
+  // Try each candidate for a valid team result
+  const resultRe = /([\w\s]{3,50}?)\s+[Ww]on\s+[Bb]y\s+([\d]+\s+(?:[Rr]uns?|[Ww]ickets?)(?:\s+\([^)]{0,30}\))?)/g;
+  for (const text of candidates) {
+    resultRe.lastIndex = 0;
+    let match;
+    while ((match = resultRe.exec(text)) !== null) {
+      const winnerRaw  = match[1].trim();
+      const winnerCode = resolveTeamCode(winnerRaw);
+      if (winnerCode === team1Code || winnerCode === team2Code) {
+        console.log(`  ✅ valid result: "${winnerRaw}" won by ${match[2].trim()}`);
+        return {
+          status: "finished",
+          winner: winnerCode,
+          result: `${winnerRaw} won by ${match[2].trim()}`,
+          scores: rawScores,
+        };
+      } else if (winnerCode) {
+        console.log(`  ⚠ skipping: ${winnerRaw} → ${winnerCode} (not ${team1Code}/${team2Code})`);
+      }
     }
   }
 
+  const isLive = /\bLIVE\b/.test(html) || html.includes("cb-font-live");
   if (isLive) return { status: "live", scores: rawScores };
   return { status: "unknown", scores: rawScores };
 }
