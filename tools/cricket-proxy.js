@@ -116,11 +116,11 @@ async function fetchScore(team1, team2) {
   const t2 = team2.toUpperCase().trim();
   console.log(`\n[proxy] looking for: ${t1} vs ${t2}`);
 
-  // Pages to search (live first, then recent, then upcoming)
+  // IPL 2026 series page first, then fallback to generic pages
   const pages = [
+    "https://www.cricbuzz.com/cricket-series/9241/indian-premier-league-2026/matches",
     "https://www.cricbuzz.com/cricket-match/live-scores",
     "https://www.cricbuzz.com/cricket-match/recent-matches",
-    "https://www.cricbuzz.com/cricket-match/upcoming-matches",
   ];
 
   let matchUrl = null;
