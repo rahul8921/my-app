@@ -83,11 +83,7 @@ function slugContainsTeam(slug, teamCode) {
 }
 
 // ── Parse a match page for result ────────────────────────────────────────────
-function parseMatchPage(html) {
-  // Result text — e.g. "RCB won by 6 wickets" / "SRH won by 42 runs"
-  const resultRe = /([\w\s]+?)\s+won\s+by\s+([\d]+\s+(?:runs?|wickets?)(?:\s+\([^)]+\))?)/i;
-  const resultMatch = html.match(resultRe);
-
+function parseMatchPage(html, team1Code, team2Code) {
   // Scores — e.g. "183/4 (20 Ovs)"
   const scoreRe  = /(\d{2,3}\/\d{1,2})\s*\([\d.]+\s*Ov/gi;
   const rawScores = [];
@@ -96,16 +92,26 @@ function parseMatchPage(html) {
 
   const isLive = /\bLIVE\b/i.test(html) || html.includes("cb-font-live");
 
-  if (resultMatch) {
-    const winnerRaw  = resultMatch[1].trim();
+  // Find ALL "X won by Y" mentions on the page
+  const resultRe = /([\w\s]+?)\s+won\s+by\s+([\d]+\s+(?:runs?|wickets?)(?:\s+\([^)]+\))?)/gi;
+  let match;
+  while ((match = resultRe.exec(html)) !== null) {
+    const winnerRaw  = match[1].trim();
     const winnerCode = resolveTeamCode(winnerRaw);
-    return {
-      status: "finished",
-      winner: winnerCode || winnerRaw,
-      result: `${winnerRaw} won by ${resultMatch[2].trim()}`,
-      scores: rawScores,
-    };
+    // Only accept if winner resolves to one of our two teams
+    if (winnerCode === team1Code || winnerCode === team2Code) {
+      console.log(`  ✅ valid result found: ${winnerRaw} won by ${match[2].trim()}`);
+      return {
+        status: "finished",
+        winner: winnerCode,
+        result: `${winnerRaw} won by ${match[2].trim()}`,
+        scores: rawScores,
+      };
+    } else {
+      console.log(`  ⚠ skipping unrelated result: ${winnerRaw} (not ${team1Code} or ${team2Code})`);
+    }
   }
+
   if (isLive) return { status: "live", scores: rawScores };
   return { status: "unknown", scores: rawScores };
 }
@@ -198,7 +204,7 @@ async function fetchScore(team1, team2) {
     return { found: false, reason: `Match page returned HTTP ${page.status}` };
   }
 
-  const parsed = parseMatchPage(page.body);
+  const parsed = parseMatchPage(page.body, t1, t2);
   console.log(`  result:`, parsed);
 
   return { found: true, matchId, matchUrl, ...parsed };
