@@ -170,7 +170,8 @@ export default function Admin() {
   }
 
   const pendingUsers = users?.filter(u => u.status === 'pending') || [];
-  const activeMatches = matches?.filter(m => m.status !== 'finished') || [];
+  const activeMatches = (matches?.filter(m => m.status !== 'finished') || [])
+    .slice().sort((a, b) => new Date(a.matchDate).getTime() - new Date(b.matchDate).getTime());
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">

@@ -1,6 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db, usersTable, betsTable, matchesTable } from "@workspace/db";
-import { eq, sum, count } from "drizzle-orm";
+import { eq, sum, count, or } from "drizzle-orm";
 import { ApproveUserParams, RejectUserParams } from "@workspace/api-zod";
 
 const CRICAPI_BASE = "https://api.cricapi.com/v1";
@@ -97,6 +97,42 @@ async function getUserWithStats(userId: string) {
     createdAt: user.createdAt.toISOString(),
   };
 }
+
+router.get("/leaderboard/journey", async (req: Request, res: Response) => {
+  // All finished matches sorted by date
+  const allMatches = await db.select().from(matchesTable).where(eq(matchesTable.status, "finished"));
+  allMatches.sort((a, b) => new Date(a.matchDate).getTime() - new Date(b.matchDate).getTime());
+
+  // All approved users
+  const users = await db.select().from(usersTable).where(eq(usersTable.status, "approved"));
+
+  // All settled bets
+  const settledBets = await db.select().from(betsTable).where(
+    or(eq(betsTable.status, "won"), eq(betsTable.status, "lost"))
+  );
+
+  const userJourneys = users.map((user) => {
+    let cumulative = 0;
+    const points = allMatches.map((match) => {
+      const bet = settledBets.find((b) => b.userId === user.id && b.matchId === match.id);
+      if (bet) {
+        if (bet.status === "won") {
+          cumulative += parseFloat(bet.payout as string) - parseFloat(bet.amount as string);
+        } else {
+          cumulative -= parseFloat(bet.amount as string);
+        }
+      }
+      return parseFloat(cumulative.toFixed(2));
+    });
+    return { username: user.username ?? "Unknown", points };
+  });
+
+  res.json({
+    matchKeys: allMatches.map((_, i) => `M${i + 1}`),
+    matchLabels: allMatches.map((m) => `${m.team1} vs ${m.team2}`),
+    users: userJourneys,
+  });
+});
 
 router.get("/leaderboard", async (req: Request, res: Response) => {
   const users = await db

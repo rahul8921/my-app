@@ -2,15 +2,15 @@ import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@workspace/replit-auth-web";
 import { formatCurrency } from "@/lib/utils";
 import {
-  BarChart,
-  Bar,
+  LineChart,
+  Line,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  Cell,
   ReferenceLine,
+  Legend,
 } from "recharts";
 
 interface LeaderboardEntry {
@@ -23,10 +23,22 @@ interface LeaderboardEntry {
   totalBets: number;
 }
 
+interface JourneyData {
+  matchKeys: string[];
+  matchLabels: string[];
+  users: { username: string; points: number[] }[];
+}
+
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 function fetchLeaderboard(): Promise<LeaderboardEntry[]> {
   return fetch(`${BASE}/api/leaderboard`, { credentials: "include" }).then(
+    (r) => r.json()
+  );
+}
+
+function fetchJourney(): Promise<JourneyData> {
+  return fetch(`${BASE}/api/leaderboard/journey`, { credentials: "include" }).then(
     (r) => r.json()
   );
 }
@@ -48,18 +60,24 @@ function Avatar({ entry }: { entry: LeaderboardEntry }) {
   );
 }
 
+const LINE_COLORS = [
+  "#f59e0b", "#22c55e", "#3b82f6", "#a855f7",
+  "#ef4444", "#06b6d4", "#ec4899", "#84cc16",
+];
+
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
-    const val = payload[0].value as number;
     return (
-      <div className="bg-card border border-white/10 rounded-xl px-4 py-3 shadow-2xl">
-        <p className="text-white font-bold text-sm mb-1">{label}</p>
-        <p
-          className={`text-sm font-semibold ${val >= 0 ? "text-green-400" : "text-red-400"}`}
-        >
-          {val >= 0 ? "+" : ""}
-          {formatCurrency(val)}
-        </p>
+      <div className="bg-card border border-white/10 rounded-xl px-4 py-3 shadow-2xl min-w-[160px]">
+        <p className="text-white font-bold text-sm mb-2">{label}</p>
+        {payload.map((p: any) => (
+          <p key={p.dataKey} className="text-xs flex items-center justify-between gap-4">
+            <span style={{ color: p.color }}>{p.dataKey}</span>
+            <span className={`font-semibold ${p.value >= 0 ? "text-green-400" : "text-red-400"}`}>
+              {p.value >= 0 ? "+" : ""}{formatCurrency(p.value)}
+            </span>
+          </p>
+        ))}
       </div>
     );
   }
@@ -75,6 +93,12 @@ export default function Leaderboard() {
     refetchInterval: 30000,
   });
 
+  const { data: journey } = useQuery<JourneyData>({
+    queryKey: ["/api/leaderboard/journey"],
+    queryFn: fetchJourney,
+    refetchInterval: 30000,
+  });
+
   if (isLoading) {
     return (
       <div className="max-w-5xl mx-auto px-4 py-12 text-center text-muted-foreground animate-pulse">
@@ -85,10 +109,13 @@ export default function Leaderboard() {
 
   const topUser = entries[0];
   const bottomUser = entries[entries.length - 1];
-  const chartData = entries.map((e) => ({
-    name: e.username,
-    balance: parseFloat(e.netBalance.toFixed(2)),
-  }));
+
+  // Build chart data: [{ match: "M1", alice: -10, bob: 5 }, ...]
+  const chartData = (journey?.matchKeys ?? []).map((key, idx) => {
+    const point: Record<string, any> = { match: key, label: journey!.matchLabels[idx] };
+    journey!.users.forEach((u) => { point[u.username] = u.points[idx] ?? 0; });
+    return point;
+  });
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8 space-y-10">
@@ -132,11 +159,13 @@ export default function Leaderboard() {
                     }`}
                   >
                     {/* Rank */}
-                    <div className="w-10 flex-shrink-0 text-center">
+                    <div className="w-14 flex-shrink-0 flex items-center justify-center">
                       {isTop ? (
                         <span className="text-2xl" title="Top player">👑</span>
                       ) : isBottom ? (
-                        <span className="text-2xl" title="Lowest player">🫏</span>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-red-500/20 text-red-400 border border-red-500/30 whitespace-nowrap">
+                          LOSER
+                        </span>
                       ) : (
                         <span className="text-lg font-bold text-muted-foreground">
                           #{index + 1}
@@ -182,7 +211,7 @@ export default function Leaderboard() {
                       </div>
                     </div>
 
-                    {/* Net balance — always visible */}
+                    {/* Net balance */}
                     <div className="text-right w-28 flex-shrink-0">
                       <p className="text-xs text-muted-foreground mb-1">
                         Net Balance
@@ -200,55 +229,56 @@ export default function Leaderboard() {
             </div>
           </div>
 
-          {/* Bar chart */}
+          {/* Cumulative Journey chart */}
           <div className="bg-card border border-white/5 rounded-2xl p-6">
-            <h2 className="font-display font-bold text-lg text-white mb-6">
-              Net Balance Chart
+            <h2 className="font-display font-bold text-lg text-white mb-1">
+              Cumulative Journey
             </h2>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart
-                data={chartData}
-                margin={{ top: 10, right: 10, left: 10, bottom: 30 }}
-              >
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke="rgba(255,255,255,0.05)"
-                />
-                <XAxis
-                  dataKey="name"
-                  tick={{ fill: "#9ca3af", fontSize: 12 }}
-                  axisLine={{ stroke: "rgba(255,255,255,0.1)" }}
-                  tickLine={false}
-                  angle={-30}
-                  textAnchor="end"
-                  interval={0}
-                />
-                <YAxis
-                  tick={{ fill: "#9ca3af", fontSize: 12 }}
-                  axisLine={false}
-                  tickLine={false}
-                  tickFormatter={(v) =>
-                    v === 0 ? "0" : `${v > 0 ? "+" : ""}${v}`
-                  }
-                />
-                <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(255,255,255,0.04)" }} />
-                <ReferenceLine y={0} stroke="rgba(255,255,255,0.15)" strokeWidth={1} />
-                <Bar dataKey="balance" radius={[6, 6, 0, 0]} maxBarSize={60}>
-                  {chartData.map((entry, index) => (
-                    <Cell
-                      key={`cell-${index}`}
-                      fill={
-                        entry.balance > 0
-                          ? "#22c55e"
-                          : entry.balance < 0
-                          ? "#ef4444"
-                          : "#6b7280"
-                      }
+            <p className="text-xs text-muted-foreground mb-6">
+              Running balance after each match — from Match 1 onwards.
+            </p>
+            {chartData.length === 0 ? (
+              <div className="h-48 flex items-center justify-center text-muted-foreground text-sm">
+                No finished matches yet — chart will appear once results are set.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={320}>
+                <LineChart
+                  data={chartData}
+                  margin={{ top: 10, right: 20, left: 10, bottom: 10 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                  <XAxis
+                    dataKey="match"
+                    tick={{ fill: "#9ca3af", fontSize: 12 }}
+                    axisLine={{ stroke: "rgba(255,255,255,0.1)" }}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    tick={{ fill: "#9ca3af", fontSize: 12 }}
+                    axisLine={false}
+                    tickLine={false}
+                    tickFormatter={(v) => `${v >= 0 ? "+" : ""}${v}`}
+                  />
+                  <Tooltip content={<CustomTooltip />} />
+                  <ReferenceLine y={0} stroke="rgba(255,255,255,0.2)" strokeWidth={1} strokeDasharray="4 4" />
+                  <Legend
+                    wrapperStyle={{ paddingTop: 16, fontSize: 12, color: "#9ca3af" }}
+                  />
+                  {(journey?.users ?? []).map((u, i) => (
+                    <Line
+                      key={u.username}
+                      type="monotone"
+                      dataKey={u.username}
+                      stroke={LINE_COLORS[i % LINE_COLORS.length]}
+                      strokeWidth={2.5}
+                      dot={{ r: 4, fill: LINE_COLORS[i % LINE_COLORS.length] }}
+                      activeDot={{ r: 6 }}
                     />
                   ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+                </LineChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </>
       )}

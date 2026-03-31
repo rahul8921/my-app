@@ -147,7 +147,7 @@ export default function MyBets() {
         </div>
       ) : (
         <div className="space-y-4">
-          {bets.map((bet) => {
+          {[...bets].sort((a, b) => new Date(a.match?.matchDate ?? 0).getTime() - new Date(b.match?.matchDate ?? 0).getTime()).map((bet) => {
             const match = bet.match;
             if (!match) return null;
 
