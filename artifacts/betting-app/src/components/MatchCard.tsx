@@ -112,8 +112,7 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
       fetch(`${BASE}/api/scores?team1=${encodeURIComponent(match.team1)}&team2=${encodeURIComponent(match.team2)}`, { credentials: "include" })
         .then(r => r.json()),
     enabled: match.status === "live" || match.status === "finished",
-    refetchInterval: match.status === "live" ? 60_000 : false,
-    staleTime: match.status === "live" ? 30_000 : Infinity,
+    staleTime: Infinity,
   });
 
   const liveScores = scoreData?.found && (scoreData.team1Score || scoreData.team2Score) ? scoreData : null;
