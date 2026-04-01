@@ -60,6 +60,68 @@ function Avatar({ entry }: { entry: LeaderboardEntry }) {
   );
 }
 
+function RunnerIcon() {
+  return (
+    <>
+      <style>{`
+        @keyframes runner-bob {
+          0%, 100% { transform: translateY(0px); }
+          50%       { transform: translateY(-2px); }
+        }
+        @keyframes runner-legL {
+          0%, 100% { transform: rotate(-32deg); }
+          50%      { transform: rotate(28deg);  }
+        }
+        @keyframes runner-legR {
+          0%, 100% { transform: rotate(28deg);  }
+          50%      { transform: rotate(-32deg); }
+        }
+        @keyframes runner-armL {
+          0%, 100% { transform: rotate(28deg);  }
+          50%      { transform: rotate(-22deg); }
+        }
+        @keyframes runner-armR {
+          0%, 100% { transform: rotate(-22deg); }
+          50%      { transform: rotate(28deg);  }
+        }
+      `}</style>
+      <svg
+        width="30" height="40"
+        viewBox="0 0 30 40"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+        style={{ animation: "runner-bob 0.38s ease-in-out infinite" }}
+      >
+        {/* Head */}
+        <circle cx="15" cy="5" r="4.5" fill="#94a3b8" />
+        {/* Torso */}
+        <line x1="15" y1="10" x2="15" y2="23"
+          stroke="#94a3b8" strokeWidth="2.5" strokeLinecap="round" />
+        {/* Left arm – pivots from shoulder (15,13) */}
+        <g style={{ animation: "runner-armL 0.38s ease-in-out infinite", transformOrigin: "15px 13px" }}>
+          <line x1="15" y1="13" x2="7" y2="20"
+            stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" />
+        </g>
+        {/* Right arm */}
+        <g style={{ animation: "runner-armR 0.38s ease-in-out infinite", transformOrigin: "15px 13px" }}>
+          <line x1="15" y1="13" x2="23" y2="20"
+            stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" />
+        </g>
+        {/* Left leg – pivots from hip (15,23) */}
+        <g style={{ animation: "runner-legL 0.38s ease-in-out infinite", transformOrigin: "15px 23px" }}>
+          <line x1="15" y1="23" x2="9" y2="37"
+            stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" />
+        </g>
+        {/* Right leg */}
+        <g style={{ animation: "runner-legR 0.38s ease-in-out infinite", transformOrigin: "15px 23px" }}>
+          <line x1="15" y1="23" x2="21" y2="37"
+            stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" />
+        </g>
+      </svg>
+    </>
+  );
+}
+
 const LINE_COLORS = [
   "#f59e0b", "#22c55e", "#3b82f6", "#a855f7",
   "#ef4444", "#06b6d4", "#ec4899", "#84cc16",
@@ -148,6 +210,7 @@ export default function Leaderboard() {
                   bottomUser &&
                   entry.id === bottomUser.id &&
                   entries.length > 1;
+                const isSecond = index === 1 && entries.length > 2;
                 const isMe = entry.id === user?.id;
                 const positive = entry.netBalance >= 0;
 
@@ -162,6 +225,10 @@ export default function Leaderboard() {
                     <div className="w-14 flex-shrink-0 flex items-center justify-center">
                       {isTop ? (
                         <span className="text-2xl" title="Top player">👑</span>
+                      ) : isSecond ? (
+                        <div title="Runner-up">
+                          <RunnerIcon />
+                        </div>
                       ) : isBottom ? (
                         <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-red-500/20 text-red-400 border border-red-500/30 whitespace-nowrap">
                           LOSER
