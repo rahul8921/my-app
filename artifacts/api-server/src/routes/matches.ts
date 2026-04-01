@@ -386,14 +386,19 @@ router.get("/scores", async (req: Request, res: Response) => {
 
   try {
     const url = `${proxyUrl.replace(/\/$/, "")}/score?team1=${encodeURIComponent(team1)}&team2=${encodeURIComponent(team2)}`;
+    console.log(`[scores] → calling: ${url}`);
     const upstream = await fetch(url, { signal: AbortSignal.timeout(8000) });
-    if (!upstream.ok) return res.json({ found: false, reason: "proxy_error" });
+    if (!upstream.ok) {
+      console.log(`[scores] ← proxy HTTP error: ${upstream.status}`);
+      return res.json({ found: false, reason: "proxy_error" });
+    }
 
     const data = await upstream.json() as {
       found: boolean;
       status?: string;
       teamScores?: Record<string, { raw: string }>;
     };
+    console.log(`[scores] ← raw response:`, JSON.stringify(data));
 
     if (!data.found || !data.teamScores) {
       return res.json({ found: false, status: data.status ?? "unknown" });
