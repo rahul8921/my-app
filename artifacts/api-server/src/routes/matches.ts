@@ -369,14 +369,30 @@ function resolveAbbrev(fullName: string): string | null {
 }
 
 // ── Live score proxy ─────────────────────────────────────────────────────────
-// GET /api/scores?team1=CSK&team2=RR
-// Calls CRICKET_PROXY_URL/score?team1=CSK&team2=RR and normalises the response
+// GET /api/scores?team1=CSK&team2=RR[&matchId=3]
+// If matchId provided and match already has a saved JSON score, returns it from DB.
+// Otherwise calls CRICKET_PROXY_URL and (for completed matches) persists the result.
 router.get("/scores", async (req: Request, res: Response) => {
   const team1 = (req.query["team1"] as string || "").trim().toUpperCase();
   const team2 = (req.query["team2"] as string || "").trim().toUpperCase();
+  const matchId = req.query["matchId"] ? Number(req.query["matchId"]) : null;
 
   if (!team1 || !team2) {
     return res.status(400).json({ error: "team1 and team2 required" });
+  }
+
+  // ── Check DB first: if match already has a saved JSON score, return it immediately ──
+  if (matchId) {
+    const [existingMatch] = await db.select().from(matchesTable).where(eq(matchesTable.id, matchId));
+    if (existingMatch?.score) {
+      try {
+        const saved = JSON.parse(existingMatch.score) as { team1Score?: string; team2Score?: string };
+        if (saved.team1Score || saved.team2Score) {
+          console.log(`[scores] ← served from DB for match ${matchId}`);
+          return res.json({ found: true, status: "completed", team1Score: saved.team1Score ?? "", team2Score: saved.team2Score ?? "" });
+        }
+      } catch { /* not JSON, fall through to API */ }
+    }
   }
 
   const proxyUrl = process.env["CRICKET_PROXY_URL"];
@@ -423,6 +439,18 @@ router.get("/scores", async (req: Request, res: Response) => {
       const vals = Object.values(data.teamScores);
       team1Score = vals[0]?.raw ?? "";
       team2Score = vals[1]?.raw ?? "";
+    }
+
+    // ── Persist to DB if match is finished and scores are complete ──
+    if (matchId && data.status === "completed" && (team1Score || team2Score)) {
+      try {
+        await db.update(matchesTable)
+          .set({ score: JSON.stringify({ team1Score, team2Score }) })
+          .where(eq(matchesTable.id, matchId));
+        console.log(`[scores] ✓ saved final scores to DB for match ${matchId}`);
+      } catch (saveErr) {
+        console.error(`[scores] failed to save scores for match ${matchId}:`, saveErr);
+      }
     }
 
     return res.json({ found: true, status: data.status, team1Score, team2Score });

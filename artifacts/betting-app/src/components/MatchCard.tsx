@@ -100,7 +100,17 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
     }
   });
 
-  // Fetch live/final scores from our proxy endpoint
+  // If match.score is a JSON object (saved from API), parse it directly — no API call needed
+  const savedJsonScore = (() => {
+    if (!match.score) return null;
+    try {
+      const p = JSON.parse(match.score) as { team1Score?: string; team2Score?: string };
+      if (p.team1Score || p.team2Score) return p;
+    } catch { /* plain text score */ }
+    return null;
+  })();
+
+  // Fetch live/final scores from our proxy endpoint (skipped if we already have saved JSON scores)
   const { data: scoreData } = useQuery<{
     found: boolean;
     status?: string;
@@ -109,13 +119,14 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
   }>({
     queryKey: ["/api/scores", match.team1, match.team2],
     queryFn: () =>
-      fetch(`${BASE}/api/scores?team1=${encodeURIComponent(match.team1)}&team2=${encodeURIComponent(match.team2)}`, { credentials: "include" })
+      fetch(`${BASE}/api/scores?team1=${encodeURIComponent(match.team1)}&team2=${encodeURIComponent(match.team2)}&matchId=${match.id}`, { credentials: "include" })
         .then(r => r.json()),
-    enabled: match.status === "live" || match.status === "finished",
+    enabled: !savedJsonScore && (match.status === "live" || match.status === "finished"),
     staleTime: Infinity,
   });
 
-  const liveScores = scoreData?.found && (scoreData.team1Score || scoreData.team2Score) ? scoreData : null;
+  const liveScores = savedJsonScore
+    ?? (scoreData?.found && (scoreData.team1Score || scoreData.team2Score) ? scoreData : null);
 
   const totalPool = match.totalBetsTeam1 + match.totalBetsTeam2;
   const team1Pct = totalPool === 0 ? 50 : Math.round((match.totalBetsTeam1 / totalPool) * 100);
