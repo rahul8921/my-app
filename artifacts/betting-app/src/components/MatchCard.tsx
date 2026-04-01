@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Coins, Pencil, Trash2, LogIn, Clock, Users } from "lucide-react";
 import { Match, Bet } from "@workspace/api-client-react/src/generated/api.schemas";
 import { usePlaceBet } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatCurrency } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@workspace/replit-auth-web";
@@ -99,6 +99,24 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
       }
     }
   });
+
+  // Fetch live/final scores from our proxy endpoint
+  const { data: scoreData } = useQuery<{
+    found: boolean;
+    status?: string;
+    team1Score?: string;
+    team2Score?: string;
+  }>({
+    queryKey: ["/api/scores", match.team1, match.team2],
+    queryFn: () =>
+      fetch(`${BASE}/api/scores?team1=${encodeURIComponent(match.team1)}&team2=${encodeURIComponent(match.team2)}`, { credentials: "include" })
+        .then(r => r.json()),
+    enabled: match.status === "live" || match.status === "finished",
+    refetchInterval: match.status === "live" ? 60_000 : false,
+    staleTime: match.status === "live" ? 30_000 : Infinity,
+  });
+
+  const liveScores = scoreData?.found && (scoreData.team1Score || scoreData.team2Score) ? scoreData : null;
 
   const totalPool = match.totalBetsTeam1 + match.totalBetsTeam2;
   const team1Pct = totalPool === 0 ? 50 : Math.round((match.totalBetsTeam1 / totalPool) * 100);
@@ -332,27 +350,73 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
           })()}
         </div>
 
-        {/* Score / Final Result */}
-        {match.score && (
-          <div className={`rounded-xl px-4 py-2.5 text-center border ${
+        {/* Live / Final Scores — from proxy API */}
+        {liveScores ? (
+          <div className={`rounded-xl border overflow-hidden ${
             isFinished
-              ? 'bg-yellow-500/10 border-yellow-500/25'
-              : 'bg-red-500/10 border-red-500/20'
+              ? 'bg-yellow-500/8 border-yellow-500/20'
+              : 'bg-red-500/8 border-red-500/20'
           }`}>
-            <p className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${
-              isFinished ? 'text-yellow-400' : 'text-red-400'
+            {/* Header bar */}
+            <div className={`flex items-center justify-center gap-2 px-3 py-1.5 ${
+              isFinished ? 'bg-yellow-500/10' : 'bg-red-500/10'
             }`}>
-              {isFinished ? '🏆 Final Result' : '🔴 Live Score'}
-            </p>
-            <p className="text-sm font-mono font-semibold text-white leading-relaxed">{match.score}</p>
+              {!isFinished && (
+                <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
+              )}
+              <span className={`text-[10px] font-black uppercase tracking-widest ${
+                isFinished ? 'text-yellow-400' : 'text-red-400'
+              }`}>
+                {isFinished ? '🏆 Final Scores' : '🔴 Live Scores'}
+              </span>
+            </div>
+            {/* Two-column score */}
+            <div className="flex divide-x divide-white/10">
+              <div className="flex-1 flex flex-col items-center py-2 px-3">
+                <span className="text-[10px] font-bold text-muted-foreground mb-0.5">{match.team1}</span>
+                <span className="font-mono font-bold text-white text-sm leading-snug">
+                  {liveScores.team1Score || '—'}
+                </span>
+              </div>
+              <div className="flex-1 flex flex-col items-center py-2 px-3">
+                <span className="text-[10px] font-bold text-muted-foreground mb-0.5">{match.team2}</span>
+                <span className="font-mono font-bold text-white text-sm leading-snug">
+                  {liveScores.team2Score || '—'}
+                </span>
+              </div>
+            </div>
+            {/* Winner line if finished */}
+            {isFinished && match.winner && (
+              <div className="text-center py-1.5 border-t border-yellow-500/15 text-[11px] font-bold text-yellow-300">
+                {match.winner} won!
+              </div>
+            )}
           </div>
-        )}
-        {/* Winner banner for finished matches with no score text */}
-        {isFinished && !match.score && match.winner && (
-          <div className="bg-yellow-500/10 border border-yellow-500/25 rounded-xl px-4 py-2.5 text-center">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-yellow-400 mb-1">🏆 Match Winner</p>
-            <p className="text-sm font-bold text-yellow-300">{match.winner} won!</p>
-          </div>
+        ) : (
+          <>
+            {/* Fallback: stored score text */}
+            {match.score && (
+              <div className={`rounded-xl px-4 py-2.5 text-center border ${
+                isFinished
+                  ? 'bg-yellow-500/10 border-yellow-500/25'
+                  : 'bg-red-500/10 border-red-500/20'
+              }`}>
+                <p className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${
+                  isFinished ? 'text-yellow-400' : 'text-red-400'
+                }`}>
+                  {isFinished ? '🏆 Final Result' : '🔴 Live Score'}
+                </p>
+                <p className="text-sm font-mono font-semibold text-white leading-relaxed">{match.score}</p>
+              </div>
+            )}
+            {/* Winner banner for finished matches with no score */}
+            {isFinished && !match.score && match.winner && (
+              <div className="bg-yellow-500/10 border border-yellow-500/25 rounded-xl px-4 py-2.5 text-center">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-yellow-400 mb-1">🏆 Match Winner</p>
+                <p className="text-sm font-bold text-yellow-300">{match.winner} won!</p>
+              </div>
+            )}
+          </>
         )}
 
         {/* Total Pool */}

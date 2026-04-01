@@ -24,8 +24,14 @@ export default function Matches() {
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
-    await queryClient.invalidateQueries({ queryKey: ['/api/matches'] });
-    await queryClient.refetchQueries({ queryKey: ['/api/matches'] });
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['/api/matches'] }),
+      queryClient.invalidateQueries({ queryKey: ['/api/scores'] }),
+    ]);
+    await Promise.all([
+      queryClient.refetchQueries({ queryKey: ['/api/matches'] }),
+      queryClient.refetchQueries({ queryKey: ['/api/scores'] }),
+    ]);
     setIsRefreshing(false);
   };
 

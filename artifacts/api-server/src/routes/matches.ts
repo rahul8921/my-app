@@ -343,4 +343,87 @@ router.patch("/matches/:matchId/result", async (req: Request, res: Response) => 
   });
 });
 
+// ── IPL team name → abbreviation lookup ────────────────────────────────────
+const IPL_ABBREV: Record<string, string[]> = {
+  CSK:  ["chennai"],
+  MI:   ["mumbai"],
+  RCB:  ["royal challengers", "bengaluru", "bangalore"],
+  KKR:  ["kolkata"],
+  SRH:  ["sunrisers", "hyderabad"],
+  DC:   ["delhi capitals"],
+  PBKS: ["punjab kings", "kings xi"],
+  RR:   ["rajasthan"],
+  GT:   ["gujarat"],
+  LSG:  ["lucknow"],
+};
+
+function resolveAbbrev(fullName: string): string | null {
+  const lower = fullName.toLowerCase();
+  for (const [abbrev, keywords] of Object.entries(IPL_ABBREV)) {
+    if (keywords.some(k => lower.includes(k))) return abbrev;
+  }
+  // direct abbrev match (e.g. "CSK")
+  const up = fullName.trim().toUpperCase();
+  if (IPL_ABBREV[up]) return up;
+  return null;
+}
+
+// ── Live score proxy ─────────────────────────────────────────────────────────
+// GET /api/scores?team1=CSK&team2=RR
+// Calls CRICKET_PROXY_URL/score?team1=CSK&team2=RR and normalises the response
+router.get("/scores", async (req: Request, res: Response) => {
+  const team1 = (req.query["team1"] as string || "").trim().toUpperCase();
+  const team2 = (req.query["team2"] as string || "").trim().toUpperCase();
+
+  if (!team1 || !team2) {
+    return res.status(400).json({ error: "team1 and team2 required" });
+  }
+
+  const proxyUrl = process.env["CRICKET_PROXY_URL"];
+  if (!proxyUrl) {
+    return res.json({ found: false, reason: "no_proxy" });
+  }
+
+  try {
+    const url = `${proxyUrl.replace(/\/$/, "")}/score?team1=${encodeURIComponent(team1)}&team2=${encodeURIComponent(team2)}`;
+    const upstream = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!upstream.ok) return res.json({ found: false, reason: "proxy_error" });
+
+    const data = await upstream.json() as {
+      found: boolean;
+      status?: string;
+      teamScores?: Record<string, { raw: string }>;
+    };
+
+    if (!data.found || !data.teamScores) {
+      return res.json({ found: false, status: data.status ?? "unknown" });
+    }
+
+    // Map full team names back to abbreviations
+    let team1Score = "";
+    let team2Score = "";
+
+    for (const [fullName, scoreObj] of Object.entries(data.teamScores)) {
+      const abbrev = resolveAbbrev(fullName);
+      if (abbrev === team1) { team1Score = scoreObj.raw; continue; }
+      if (abbrev === team2) { team2Score = scoreObj.raw; continue; }
+      // fallback: direct string inclusion
+      const lower = fullName.toLowerCase();
+      if (lower.includes(team1.toLowerCase())) team1Score = scoreObj.raw;
+      else if (lower.includes(team2.toLowerCase())) team2Score = scoreObj.raw;
+    }
+
+    // Last resort: assign in order if still empty
+    if (!team1Score && !team2Score) {
+      const vals = Object.values(data.teamScores);
+      team1Score = vals[0]?.raw ?? "";
+      team2Score = vals[1]?.raw ?? "";
+    }
+
+    return res.json({ found: true, status: data.status, team1Score, team2Score });
+  } catch (err) {
+    return res.json({ found: false, reason: "timeout" });
+  }
+});
+
 export default router;
