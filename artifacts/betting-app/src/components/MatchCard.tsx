@@ -100,29 +100,37 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
     }
   });
 
-  // If match.score is a JSON object (saved from API), parse it directly — no API call needed
+  // If match.score is saved JSON (from a previous CricAPI call), parse it directly
   const savedJsonScore = (() => {
     if (!match.score) return null;
     try {
-      const p = JSON.parse(match.score) as { team1Score?: string; team2Score?: string };
+      const p = JSON.parse(match.score) as { team1Score?: string; team2Score?: string; result?: string };
       if (p.team1Score || p.team2Score) return p;
-    } catch { /* plain text score */ }
+    } catch { /* plain text score — handled in fallback */ }
     return null;
   })();
 
-  // Fetch live/final scores from our proxy endpoint (skipped if we already have saved JSON scores)
+  const isLive = match.status === "live";
+  const isFinished = match.status === "finished";
+
+  // Live scores: always fresh on page load (staleTime: 0)
+  // Finished scores: DB-first, call CricAPI once if not saved (staleTime: Infinity)
   const { data: scoreData } = useQuery<{
     found: boolean;
     status?: string;
     team1Score?: string;
     team2Score?: string;
+    result?: string;
   }>({
-    queryKey: ["/api/scores", match.team1, match.team2],
+    queryKey: ["/api/scores", match.team1, match.team2, match.status],
     queryFn: () =>
-      fetch(`${BASE}/api/scores?team1=${encodeURIComponent(match.team1)}&team2=${encodeURIComponent(match.team2)}&matchId=${match.id}`, { credentials: "include" })
-        .then(r => r.json()),
-    enabled: !savedJsonScore && (match.status === "live" || match.status === "finished"),
-    staleTime: Infinity,
+      fetch(
+        `${BASE}/api/scores?team1=${encodeURIComponent(match.team1)}&team2=${encodeURIComponent(match.team2)}&matchId=${match.id}&matchStatus=${match.status}`,
+        { credentials: "include" }
+      ).then(r => r.json()),
+    enabled: !savedJsonScore && (isLive || isFinished),
+    staleTime: isLive ? 0 : Infinity,
+    refetchOnWindowFocus: isLive,
   });
 
   const liveScores = savedJsonScore
@@ -132,7 +140,6 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
   const team1Pct = totalPool === 0 ? 50 : Math.round((match.totalBetsTeam1 / totalPool) * 100);
   const team2Pct = totalPool === 0 ? 50 : Math.round((match.totalBetsTeam2 / totalPool) * 100);
 
-  const isFinished = match.status === 'finished';
   const matchTimeUp = new Date() >= new Date(match.matchDate);
   const canBet = match.status === 'upcoming' && !matchTimeUp && isApproved && !userBet;
   const canEdit = !!userBet && match.status === 'upcoming' && !matchTimeUp && isApproved;
@@ -395,10 +402,10 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
                 </span>
               </div>
             </div>
-            {/* Winner line if finished */}
-            {isFinished && match.winner && (
+            {/* Winner / result line if finished */}
+            {isFinished && (liveScores.result || match.winner) && (
               <div className="text-center py-1.5 border-t border-yellow-500/15 text-[11px] font-bold text-yellow-300">
-                {match.winner} won!
+                {liveScores.result || `${match.winner} won!`}
               </div>
             )}
           </div>

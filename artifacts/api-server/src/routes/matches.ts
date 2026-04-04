@@ -368,84 +368,109 @@ function resolveAbbrev(fullName: string): string | null {
   return null;
 }
 
-// ── Live score proxy ─────────────────────────────────────────────────────────
+// ── Live score via CricAPI (cricScore endpoint) ───────────────────────────────
 // GET /api/scores?team1=CSK&team2=RR[&matchId=3]
-// If matchId provided and match already has a saved JSON score, returns it from DB.
-// Otherwise calls CRICKET_PROXY_URL and (for completed matches) persists the result.
+// • Finished matches: DB-first — if JSON score already saved, return immediately.
+//   Otherwise call CricAPI once, save to DB, never call again.
+// • Live matches: always call CricAPI fresh (no caching).
 router.get("/scores", async (req: Request, res: Response) => {
   const team1 = (req.query["team1"] as string || "").trim().toUpperCase();
   const team2 = (req.query["team2"] as string || "").trim().toUpperCase();
   const matchId = req.query["matchId"] ? Number(req.query["matchId"]) : null;
+  const matchStatus = (req.query["matchStatus"] as string || "").toLowerCase();
 
   if (!team1 || !team2) {
     return res.status(400).json({ error: "team1 and team2 required" });
   }
 
-  // ── Check DB first: if match already has a saved JSON score, return it immediately ──
-  if (matchId) {
+  // ── For finished matches: check DB first ────────────────────────────────────
+  if (matchId && matchStatus === "finished") {
     const [existingMatch] = await db.select().from(matchesTable).where(eq(matchesTable.id, matchId));
     if (existingMatch?.score) {
       try {
-        const saved = JSON.parse(existingMatch.score) as { team1Score?: string; team2Score?: string };
+        const saved = JSON.parse(existingMatch.score) as { team1Score?: string; team2Score?: string; result?: string };
         if (saved.team1Score || saved.team2Score) {
           console.log(`[scores] ← served from DB for match ${matchId}`);
-          return res.json({ found: true, status: "completed", team1Score: saved.team1Score ?? "", team2Score: saved.team2Score ?? "" });
+          return res.json({ found: true, status: "completed", team1Score: saved.team1Score ?? "", team2Score: saved.team2Score ?? "", result: saved.result ?? "" });
         }
-      } catch { /* not JSON, fall through to API */ }
+      } catch { /* not JSON — fall through to API */ }
     }
   }
 
-  const proxyUrl = process.env["CRICKET_PROXY_URL"];
-  if (!proxyUrl) {
-    return res.json({ found: false, reason: "no_proxy" });
+  const apiKey = process.env["CRICAPI_KEY"];
+  if (!apiKey) {
+    return res.json({ found: false, reason: "no_api_key" });
   }
 
   try {
-    const url = `${proxyUrl.replace(/\/$/, "")}/score?team1=${encodeURIComponent(team1)}&team2=${encodeURIComponent(team2)}`;
-    console.log(`[scores] → calling: ${url}`);
-    const upstream = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    const url = `https://api.cricapi.com/v1/cricScore?apikey=${apiKey}`;
+    console.log(`[scores] → calling CricAPI cricScore for ${team1} vs ${team2}`);
+    const upstream = await fetch(url, { signal: AbortSignal.timeout(10000) });
     if (!upstream.ok) {
-      console.log(`[scores] ← proxy HTTP error: ${upstream.status}`);
-      return res.json({ found: false, reason: "proxy_error" });
+      console.log(`[scores] ← CricAPI HTTP error: ${upstream.status}`);
+      return res.json({ found: false, reason: "api_error" });
     }
 
-    const data = await upstream.json() as {
-      found: boolean;
-      status?: string;
-      teamScores?: Record<string, { raw: string }>;
-    };
-    console.log(`[scores] ← raw response:`, JSON.stringify(data));
+    const data = await upstream.json() as { data?: Array<{
+      t1: string; t2: string; t1s?: string; t2s?: string;
+      ms: string; status?: string;
+    }> };
 
-    if (!data.found || !data.teamScores) {
-      return res.json({ found: false, status: data.status ?? "unknown" });
-    }
+    const matches = data.data ?? [];
+    const input1 = team1.toLowerCase();
+    const input2 = team2.toLowerCase();
 
-    // Map full team names back to abbreviations
     let team1Score = "";
     let team2Score = "";
+    let resultStatus = "";
+    let apiMatchStatus = "";
 
-    for (const [fullName, scoreObj] of Object.entries(data.teamScores)) {
-      const abbrev = resolveAbbrev(fullName);
-      if (abbrev === team1) { team1Score = scoreObj.raw; continue; }
-      if (abbrev === team2) { team2Score = scoreObj.raw; continue; }
-      // fallback: direct string inclusion
-      const lower = fullName.toLowerCase();
-      if (lower.includes(team1.toLowerCase())) team1Score = scoreObj.raw;
-      else if (lower.includes(team2.toLowerCase())) team2Score = scoreObj.raw;
+    for (const m of matches) {
+      // Strip brackets: "Chennai Super Kings [CSK]" → name="Chennai Super Kings", abbr="CSK"
+      const t1Name = m.t1.replace(/\[.*?\]/g, "").trim();
+      const t2Name = m.t2.replace(/\[.*?\]/g, "").trim();
+      const t1Abbr = (m.t1.match(/\[(.*?)\]/) ?? [])[1] ?? "";
+      const t2Abbr = (m.t2.match(/\[(.*?)\]/) ?? [])[1] ?? "";
+
+      const isDirectMatch =
+        (input1 === t1Name.toLowerCase() || input1 === t1Abbr.toLowerCase()) &&
+        (input2 === t2Name.toLowerCase() || input2 === t2Abbr.toLowerCase());
+      const isReverseMatch =
+        (input1 === t2Name.toLowerCase() || input1 === t2Abbr.toLowerCase()) &&
+        (input2 === t1Name.toLowerCase() || input2 === t1Abbr.toLowerCase());
+
+      if (!isDirectMatch && !isReverseMatch) continue;
+
+      apiMatchStatus = m.ms; // "fixture" | "live" | "result"
+
+      if (m.ms === "fixture") {
+        // Not started yet — no scores
+        return res.json({ found: true, status: "scheduled", team1Score: "", team2Score: "", result: "" });
+      }
+
+      // Assign scores respecting team order
+      team1Score = isDirectMatch ? (m.t1s ?? "") : (m.t2s ?? "");
+      team2Score = isDirectMatch ? (m.t2s ?? "") : (m.t1s ?? "");
+
+      if (m.ms === "result" || m.ms === "completed") {
+        resultStatus = m.status ?? "";
+      }
+      break;
     }
 
-    // Last resort: assign in order if still empty
-    if (!team1Score && !team2Score) {
-      const vals = Object.values(data.teamScores);
-      team1Score = vals[0]?.raw ?? "";
-      team2Score = vals[1]?.raw ?? "";
+    if (!team1Score && !team2Score && !resultStatus) {
+      console.log(`[scores] ← no match found in CricAPI for ${team1} vs ${team2}`);
+      return res.json({ found: false, status: "not_found" });
     }
 
-    // ── Persist to DB if match is finished and scores are complete ──
-    if (matchId && data.status === "completed" && (team1Score || team2Score)) {
+    const isCompleted = apiMatchStatus === "result" || apiMatchStatus === "completed";
+    console.log(`[scores] ← ${apiMatchStatus}: ${team1}=${team1Score} ${team2}=${team2Score} result="${resultStatus}"`);
+
+    // ── For finished matches: persist to DB so we never call again ──────────────
+    if (matchId && isCompleted && (team1Score || team2Score)) {
       try {
         await db.update(matchesTable)
-          .set({ score: JSON.stringify({ team1Score, team2Score }) })
+          .set({ score: JSON.stringify({ team1Score, team2Score, result: resultStatus }) })
           .where(eq(matchesTable.id, matchId));
         console.log(`[scores] ✓ saved final scores to DB for match ${matchId}`);
       } catch (saveErr) {
@@ -453,7 +478,7 @@ router.get("/scores", async (req: Request, res: Response) => {
       }
     }
 
-    return res.json({ found: true, status: data.status, team1Score, team2Score });
+    return res.json({ found: true, status: isCompleted ? "completed" : "live", team1Score, team2Score, result: resultStatus });
   } catch (err) {
     return res.json({ found: false, reason: "timeout" });
   }
