@@ -21,7 +21,6 @@ function getNotifiedKey(userId: string) {
   return `betzone_notified_${userId}`;
 }
 
-// Try localStorage first, fall back to sessionStorage (for Safari Private mode)
 function getStorage(): Storage | null {
   try {
     localStorage.setItem("__test__", "1");
@@ -51,9 +50,7 @@ function markNotified(userId: string, ids: number[]) {
     const existing = getNotifiedIds(userId);
     ids.forEach(id => existing.add(id));
     store.setItem(getNotifiedKey(userId), JSON.stringify([...existing]));
-  } catch {
-    // storage write failed — silent, notification just may show again next session
-  }
+  } catch { /* silent */ }
 }
 
 export function SettlementNotification() {
@@ -73,31 +70,20 @@ export function SettlementNotification() {
 
   useEffect(() => {
     if (!bets || !user?.id) return;
-
     const notifiedIds = getNotifiedIds(user.id);
     const newWon = bets.filter(b => b.status === "won" && !notifiedIds.has(b.id));
     const newLost = bets.filter(b => b.status === "lost" && !notifiedIds.has(b.id));
-
     if (newWon.length === 0 && newLost.length === 0) return;
-
     setWonBets(newWon);
     setLostBets(newLost);
     setVisible(true);
   }, [bets, user?.id]);
 
-  // Confetti on win
   useEffect(() => {
     if (!visible || wonBets.length === 0 || confettiFired.current) return;
     confettiFired.current = true;
-
-    const fire = (particleRatio: number, opts: confetti.Options) => {
-      confetti({
-        origin: { y: 0.6 },
-        ...opts,
-        particleCount: Math.floor(200 * particleRatio),
-      });
-    };
-
+    const fire = (particleRatio: number, opts: confetti.Options) =>
+      confetti({ origin: { y: 0.6 }, ...opts, particleCount: Math.floor(200 * particleRatio) });
     fire(0.25, { spread: 26, startVelocity: 55, colors: ["#FFD700", "#FFA500"] });
     fire(0.2,  { spread: 60, colors: ["#ffffff", "#FFD700"] });
     fire(0.35, { spread: 100, decay: 0.91, scalar: 0.8, colors: ["#FFD700", "#ff6b6b"] });
@@ -105,7 +91,6 @@ export function SettlementNotification() {
     fire(0.1,  { spread: 120, startVelocity: 45, colors: ["#ffffff", "#FFD700"] });
   }, [visible, wonBets]);
 
-  // Escape key to dismiss
   useEffect(() => {
     if (!visible) return;
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") dismiss(); };
@@ -114,16 +99,8 @@ export function SettlementNotification() {
   }, [visible]);
 
   function dismiss() {
-    if (!user?.id) {
-      // Even if user id is missing, force-close the modal
-      setVisible(false);
-      setWonBets([]);
-      setLostBets([]);
-      confettiFired.current = false;
-      return;
-    }
     const allIds = [...wonBets, ...lostBets].map(b => b.id);
-    markNotified(user.id, allIds);
+    if (user?.id) markNotified(user.id, allIds);
     setVisible(false);
     setWonBets([]);
     setLostBets([]);
@@ -137,99 +114,134 @@ export function SettlementNotification() {
   const netProfit = totalPayout - totalStaked;
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 9999 }}>
-      {/* Backdrop — sits BEHIND the modal via z-index, no backdrop-filter to avoid Safari stacking bug */}
+    /*
+     * The outer div IS the backdrop — clicking it dismisses the modal.
+     * The inner card calls e.stopPropagation() so taps inside don't bubble up.
+     * This avoids all iOS Safari z-index / onClick-on-div bugs entirely.
+     */
+    <div
+      onClick={dismiss}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 9999,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "1rem",
+        backgroundColor: "rgba(0,0,0,0.78)",
+        WebkitTapHighlightColor: "transparent",
+      }}
+    >
+      {/* Modal card — stopPropagation keeps taps inside from closing */}
       <div
-        className="absolute inset-0 bg-black/75"
-        style={{ zIndex: 0 }}
-        onClick={dismiss}
-      />
-
-      {/* Modal — explicitly above backdrop */}
-      <div
-        className="relative w-full max-w-md rounded-2xl border border-white/10 shadow-2xl overflow-hidden"
-        style={{ zIndex: 1 }}
+        onClick={e => e.stopPropagation()}
+        style={{
+          position: "relative",
+          width: "100%",
+          maxWidth: "28rem",
+          borderRadius: "1rem",
+          border: "1px solid rgba(255,255,255,0.1)",
+          boxShadow: "0 25px 50px rgba(0,0,0,0.6)",
+          overflow: "hidden",
+        }}
       >
-        {/* Close button — large tap target for mobile */}
+        {/* X close button — full button element, iOS fires events on buttons reliably */}
         <button
           onClick={dismiss}
           aria-label="Close"
-          className="absolute top-3 right-3 p-2 rounded-full bg-black/40 hover:bg-black/60 transition-colors"
-          style={{ zIndex: 2 }}
+          style={{
+            position: "absolute",
+            top: "0.75rem",
+            right: "0.75rem",
+            zIndex: 10,
+            padding: "0.625rem",
+            borderRadius: "9999px",
+            background: "rgba(0,0,0,0.5)",
+            border: "none",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            touchAction: "manipulation",
+          }}
         >
-          <X className="h-5 w-5 text-white" />
+          <X style={{ width: "1.25rem", height: "1.25rem", color: "white" }} />
         </button>
 
         {/* Won section */}
         {wonBets.length > 0 && (
-          <div className="bg-gradient-to-br from-yellow-900/80 via-yellow-800/60 to-amber-900/80 px-6 pt-8 pb-6 text-center">
-            <div className="text-5xl mb-3">🏆</div>
-            <h2 className="text-2xl font-black text-yellow-300 mb-1">You Won!</h2>
-            <p className="text-yellow-200/80 text-sm mb-5">
+          <div style={{ background: "linear-gradient(135deg, #4a3000 0%, #3d2800 50%, #4a3500 100%)", padding: "2rem 1.5rem 1.5rem", textAlign: "center" }}>
+            <div style={{ fontSize: "3rem", marginBottom: "0.75rem" }}>🏆</div>
+            <h2 style={{ fontSize: "1.5rem", fontWeight: 900, color: "#fde68a", marginBottom: "0.25rem" }}>You Won!</h2>
+            <p style={{ color: "rgba(253,230,138,0.75)", fontSize: "0.875rem", marginBottom: "1.25rem" }}>
               {wonBets.length === 1
                 ? `Your bet on ${wonBets[0].team} paid off!`
                 : `${wonBets.length} bets settled in your favour!`}
             </p>
 
-            <div className="space-y-2 mb-5">
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginBottom: "1.25rem" }}>
               {wonBets.map(bet => (
-                <div
-                  key={bet.id}
-                  className="flex items-center justify-between bg-yellow-500/10 border border-yellow-500/20 rounded-xl px-4 py-2.5"
-                >
-                  <div className="flex items-center gap-2">
-                    <Trophy className="h-4 w-4 text-yellow-400" />
-                    <span className="font-bold text-white text-sm">{bet.team}</span>
+                <div key={bet.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "rgba(234,179,8,0.1)", border: "1px solid rgba(234,179,8,0.2)", borderRadius: "0.75rem", padding: "0.625rem 1rem" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                    <Trophy style={{ width: "1rem", height: "1rem", color: "#fbbf24" }} />
+                    <span style={{ fontWeight: 700, color: "white", fontSize: "0.875rem" }}>{bet.team}</span>
                   </div>
-                  <div className="text-right">
-                    <p className="text-xs text-yellow-300/70">Payout</p>
-                    <p className="font-black text-yellow-300 text-base">{formatCurrency(bet.payout ?? 0)}</p>
+                  <div style={{ textAlign: "right" }}>
+                    <p style={{ fontSize: "0.75rem", color: "rgba(253,230,138,0.6)", margin: 0 }}>Payout</p>
+                    <p style={{ fontWeight: 900, color: "#fde68a", fontSize: "1rem", margin: 0 }}>{formatCurrency(bet.payout ?? 0)}</p>
                   </div>
                 </div>
               ))}
             </div>
 
-            <div className="bg-yellow-500/15 border border-yellow-500/30 rounded-xl px-4 py-3">
-              <p className="text-xs text-yellow-300/70 mb-0.5">Net Profit</p>
-              <p className="text-3xl font-black text-yellow-300">+{formatCurrency(netProfit)}</p>
+            <div style={{ background: "rgba(234,179,8,0.15)", border: "1px solid rgba(234,179,8,0.3)", borderRadius: "0.75rem", padding: "0.75rem 1rem" }}>
+              <p style={{ fontSize: "0.75rem", color: "rgba(253,230,138,0.6)", margin: "0 0 0.25rem" }}>Net Profit</p>
+              <p style={{ fontSize: "1.875rem", fontWeight: 900, color: "#fde68a", margin: 0 }}>+{formatCurrency(netProfit)}</p>
             </div>
           </div>
         )}
 
         {/* Lost section */}
         {lostBets.length > 0 && (
-          <div className={`px-6 py-5 text-center ${wonBets.length > 0 ? 'bg-gray-900/95 border-t border-white/10' : 'bg-gradient-to-br from-gray-900 to-red-950/60'}`}>
-            {wonBets.length === 0 && (
-              <div className="text-4xl mb-3">😔</div>
-            )}
-            <div className="flex items-center justify-center gap-2 mb-3">
-              <Frown className={`h-4 w-4 ${wonBets.length > 0 ? 'text-red-400' : 'text-red-300'}`} />
-              <h3 className={`font-bold ${wonBets.length > 0 ? 'text-red-400 text-sm' : 'text-red-300 text-lg'}`}>
-                {wonBets.length > 0 ? 'Also lost:' : 'Better luck next time'}
+          <div style={{ padding: "1.25rem 1.5rem", textAlign: "center", background: wonBets.length > 0 ? "#111827" : "linear-gradient(135deg, #111827 0%, #1f0a0a 100%)", borderTop: wonBets.length > 0 ? "1px solid rgba(255,255,255,0.08)" : "none" }}>
+            {wonBets.length === 0 && <div style={{ fontSize: "2.5rem", marginBottom: "0.75rem" }}>😔</div>}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "0.5rem", marginBottom: "0.75rem" }}>
+              <Frown style={{ width: "1rem", height: "1rem", color: wonBets.length > 0 ? "#f87171" : "#fca5a5" }} />
+              <h3 style={{ fontWeight: 700, color: wonBets.length > 0 ? "#f87171" : "#fca5a5", fontSize: wonBets.length > 0 ? "0.875rem" : "1.125rem", margin: 0 }}>
+                {wonBets.length > 0 ? "Also lost:" : "Better luck next time"}
               </h3>
             </div>
-            <div className="space-y-2">
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
               {lostBets.map(bet => (
-                <div
-                  key={bet.id}
-                  className="flex items-center justify-between bg-red-500/8 border border-red-500/15 rounded-xl px-4 py-2"
-                >
-                  <span className="text-sm text-white/70">{bet.team}</span>
-                  <span className="text-sm font-semibold text-red-400">-{formatCurrency(bet.amount)}</span>
+                <div key={bet.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.12)", borderRadius: "0.75rem", padding: "0.5rem 1rem" }}>
+                  <span style={{ fontSize: "0.875rem", color: "rgba(255,255,255,0.65)" }}>{bet.team}</span>
+                  <span style={{ fontSize: "0.875rem", fontWeight: 600, color: "#f87171" }}>-{formatCurrency(bet.amount)}</span>
                 </div>
               ))}
             </div>
             {wonBets.length === 0 && (
-              <p className="text-xs text-white/40 mt-4">The next match could be yours 💪</p>
+              <p style={{ fontSize: "0.75rem", color: "rgba(255,255,255,0.3)", marginTop: "1rem", marginBottom: 0 }}>The next match could be yours 💪</p>
             )}
           </div>
         )}
 
-        {/* Dismiss button — full-width, easy to tap */}
-        <div className="bg-gray-900 border-t border-white/5 px-6 py-4">
+        {/* Got it button */}
+        <div style={{ background: "#111827", borderTop: "1px solid rgba(255,255,255,0.05)", padding: "1rem 1.5rem" }}>
           <button
             onClick={dismiss}
-            className="w-full py-3 rounded-xl font-bold text-base bg-white/10 hover:bg-white/20 active:bg-white/25 text-white transition-colors"
+            style={{
+              width: "100%",
+              padding: "0.875rem",
+              borderRadius: "0.75rem",
+              fontWeight: 700,
+              fontSize: "1rem",
+              background: "rgba(255,255,255,0.12)",
+              color: "white",
+              border: "none",
+              cursor: "pointer",
+              touchAction: "manipulation",
+            }}
           >
             Got it!
           </button>
