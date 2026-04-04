@@ -281,18 +281,29 @@ router.patch("/matches/:matchId/result", async (req: Request, res: Response) => 
     return;
   }
 
+  // When admin manually overrides result on a finished match:
+  // Clear the old cached JSON score so stale "result" text is replaced.
+  // If admin provided a new score string explicitly, use that instead.
+  let scoreUpdate: string | null | undefined;
+  if (score !== undefined) {
+    scoreUpdate = score; // explicit new score from admin
+  } else if (status === "finished" && existing.status === "finished") {
+    // Re-settling a finished match without new score — clear stale JSON
+    scoreUpdate = null;
+  }
+
   const [updated] = await db
     .update(matchesTable)
     .set({
       status,
       winner: winner ?? null,
-      ...(score !== undefined ? { score } : {}),
+      ...(scoreUpdate !== undefined ? { score: scoreUpdate } : {}),
       updatedAt: new Date(),
     })
     .where(eq(matchesTable.id, matchId))
     .returning();
 
-  // If match is finished, settle bets
+  // If match is finished, settle (or re-settle) bets
   if (status === "finished" && winner) {
     const bets = await db
       .select()

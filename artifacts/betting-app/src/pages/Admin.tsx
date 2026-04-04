@@ -169,9 +169,13 @@ export default function Admin() {
     }
   }
 
+  const [showFinished, setShowFinished] = useState(false);
+  const [finishedEditId, setFinishedEditId] = useState<number | null>(null);
+
   const pendingUsers = users?.filter(u => u.status === 'pending') || [];
-  const activeMatches = (matches?.filter(m => m.status !== 'finished') || [])
-    .slice().sort((a, b) => new Date(a.matchDate).getTime() - new Date(b.matchDate).getTime());
+  const allMatches = (matches || []).slice().sort((a, b) => new Date(a.matchDate).getTime() - new Date(b.matchDate).getTime());
+  const activeMatches = allMatches.filter(m => m.status !== 'finished');
+  const finishedMatches = allMatches.filter(m => m.status === 'finished');
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
@@ -359,76 +363,112 @@ export default function Admin() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {activeMatches.map(match => (
-              <div key={match.id} className="bg-card border border-white/5 rounded-2xl p-6 relative">
-                <div className="flex justify-between items-start mb-4">
-                  <button
-                    onClick={() => {
-                      const d = new Date(match.matchDate);
-                      const offsetMs = -4 * 60 * 60 * 1000;
-                      const etDate = new Date(d.getTime() + offsetMs);
-                      const etStr = etDate.toISOString().slice(0, 16);
-                      setEditMatchId(match.id);
-                      setEditMatchDate(etStr);
-                    }}
-                    className="flex items-center gap-1 text-xs font-bold text-muted-foreground bg-secondary px-2 py-1 rounded hover:text-amber-400 transition-colors"
-                    title="Click to edit time"
-                  >
-                    <Pencil className="h-3 w-3" />
-                    {new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true }).format(new Date(match.matchDate))} ET
-                  </button>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setMatchResult.mutate({
-                        matchId: match.id,
-                        data: { status: match.status === 'upcoming' ? 'live' : 'upcoming', winner: null }
-                      })}
-                      className="text-xs text-blue-400 hover:underline"
-                    >
-                      Set {match.status === 'upcoming' ? 'Live' : 'Upcoming'}
-                    </button>
-                  </div>
-                </div>
-                
-                <h4 className="text-xl font-display font-bold text-white mb-6 text-center">
-                  {match.team1} <span className="text-muted-foreground font-normal text-sm mx-2">vs</span> {match.team2}
-                </h4>
-
-                <div className="space-y-3">
-                  <p className="text-sm font-medium text-center text-muted-foreground mb-2">Conclude Match</p>
-                  <div>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1">Final Score / Result <span className="text-primary/60">(optional)</span></label>
-                    <input
-                      type="text"
-                      placeholder={`e.g. ${match.team1}: 172/4  •  ${match.team2}: 168/8`}
-                      value={matchScores[match.id] ?? ""}
-                      onChange={e => setMatchScores(prev => ({ ...prev, [match.id]: e.target.value }))}
-                      className="w-full px-3 py-2 rounded-lg bg-background border border-white/10 text-white text-sm focus:outline-none focus:border-primary mb-2"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <button
-                      onClick={() => handleSetResult(match.id, match.team1, matchScores[match.id])}
-                      className="py-2 px-3 rounded-lg border border-white/10 hover:border-primary hover:bg-primary/10 transition-colors text-sm font-semibold"
-                    >
-                      {match.team1} Won
-                    </button>
-                    <button
-                      onClick={() => handleSetResult(match.id, match.team2, matchScores[match.id])}
-                      className="py-2 px-3 rounded-lg border border-white/10 hover:border-primary hover:bg-primary/10 transition-colors text-sm font-semibold"
-                    >
-                      {match.team2} Won
-                    </button>
-                  </div>
-                  <button
-                    onClick={() => handleSetResult(match.id, null, matchScores[match.id])}
-                    className="w-full py-2 px-3 rounded-lg border border-white/10 hover:border-white/30 hover:bg-secondary transition-colors text-sm font-semibold mt-2"
-                  >
-                    Draw / Cancel
-                  </button>
-                </div>
-              </div>
+              <MatchAdminCard
+                key={match.id}
+                match={match}
+                score={matchScores[match.id] ?? ""}
+                onScoreChange={v => setMatchScores(prev => ({ ...prev, [match.id]: v }))}
+                onSetResult={handleSetResult}
+                onSetMatchResult={setMatchResult}
+                onEditTime={() => {
+                  const d = new Date(match.matchDate);
+                  const offsetMs = -4 * 60 * 60 * 1000;
+                  const etDate = new Date(d.getTime() + offsetMs);
+                  setEditMatchId(match.id);
+                  setEditMatchDate(etDate.toISOString().slice(0, 16));
+                }}
+              />
             ))}
           </div>
+
+          {/* Finished Matches Section */}
+          {finishedMatches.length > 0 && (
+            <div className="mt-8">
+              <button
+                onClick={() => setShowFinished(v => !v)}
+                className="flex items-center gap-2 text-sm font-bold text-muted-foreground hover:text-white transition-colors mb-4"
+              >
+                <span className={`transition-transform ${showFinished ? 'rotate-90' : ''}`}>▶</span>
+                Finished Matches ({finishedMatches.length}) — click to edit incorrect results
+              </button>
+
+              {showFinished && (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {finishedMatches.map(match => (
+                    <div key={match.id} className="bg-card border border-amber-500/20 rounded-2xl p-6 relative">
+                      <div className="flex justify-between items-center mb-3">
+                        <span className="text-xs font-bold text-amber-500/70 bg-amber-500/10 px-2 py-0.5 rounded">FINISHED</span>
+                        <span className="text-xs text-muted-foreground">
+                          {new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", month: "short", day: "numeric" }).format(new Date(match.matchDate))}
+                        </span>
+                      </div>
+
+                      <h4 className="text-lg font-display font-bold text-white mb-1 text-center">
+                        {match.team1} <span className="text-muted-foreground font-normal text-sm mx-2">vs</span> {match.team2}
+                      </h4>
+
+                      {match.winner && (
+                        <p className="text-center text-xs text-green-400 font-semibold mb-4">
+                          Winner: {match.winner}
+                        </p>
+                      )}
+
+                      {finishedEditId === match.id ? (
+                        <div className="space-y-3 border-t border-amber-500/20 pt-4 mt-2">
+                          <p className="text-xs text-amber-400 font-medium text-center">
+                            ⚠ Changing this will re-settle all bets for this match
+                          </p>
+                          <div>
+                            <label className="block text-xs font-medium text-muted-foreground mb-1">Updated Score / Result <span className="text-primary/60">(optional)</span></label>
+                            <input
+                              type="text"
+                              placeholder={`e.g. ${match.team1}: 172/4  •  ${match.team2}: 168/8`}
+                              value={matchScores[match.id] ?? ""}
+                              onChange={e => setMatchScores(prev => ({ ...prev, [match.id]: e.target.value }))}
+                              className="w-full px-3 py-2 rounded-lg bg-background border border-white/10 text-white text-sm focus:outline-none focus:border-amber-500 mb-2"
+                            />
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              onClick={() => { handleSetResult(match.id, match.team1, matchScores[match.id]); setFinishedEditId(null); }}
+                              className="py-2 px-2 rounded-lg border border-white/10 hover:border-primary hover:bg-primary/10 transition-colors text-xs font-bold"
+                            >
+                              {match.team1} Won
+                            </button>
+                            <button
+                              onClick={() => { handleSetResult(match.id, match.team2, matchScores[match.id]); setFinishedEditId(null); }}
+                              className="py-2 px-2 rounded-lg border border-white/10 hover:border-primary hover:bg-primary/10 transition-colors text-xs font-bold"
+                            >
+                              {match.team2} Won
+                            </button>
+                          </div>
+                          <button
+                            onClick={() => { handleSetResult(match.id, null, matchScores[match.id]); setFinishedEditId(null); }}
+                            className="w-full py-2 rounded-lg border border-white/10 hover:border-white/30 hover:bg-secondary transition-colors text-xs font-semibold"
+                          >
+                            Draw / Cancel
+                          </button>
+                          <button
+                            onClick={() => setFinishedEditId(null)}
+                            className="w-full py-1.5 text-xs text-muted-foreground hover:text-white transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setFinishedEditId(match.id)}
+                          className="w-full mt-2 py-2 rounded-lg border border-amber-500/30 hover:border-amber-500/60 hover:bg-amber-500/5 transition-colors text-xs font-bold text-amber-400 flex items-center justify-center gap-1.5"
+                        >
+                          <Pencil className="h-3 w-3" /> Edit Result
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </TabsContent>
       </Tabs>
 
@@ -457,6 +497,79 @@ export default function Admin() {
           </div>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+function MatchAdminCard({ match, score, onScoreChange, onSetResult, onSetMatchResult, onEditTime }: {
+  match: any;
+  score: string;
+  onScoreChange: (v: string) => void;
+  onSetResult: (matchId: number, winner: string | null, score?: string) => void;
+  onSetMatchResult: any;
+  onEditTime: () => void;
+}) {
+  return (
+    <div className="bg-card border border-white/5 rounded-2xl p-6 relative">
+      <div className="flex justify-between items-start mb-4">
+        <button
+          onClick={onEditTime}
+          className="flex items-center gap-1 text-xs font-bold text-muted-foreground bg-secondary px-2 py-1 rounded hover:text-amber-400 transition-colors"
+          title="Click to edit time"
+        >
+          <Pencil className="h-3 w-3" />
+          {new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true }).format(new Date(match.matchDate))} ET
+        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => onSetMatchResult.mutate({
+              matchId: match.id,
+              data: { status: match.status === 'upcoming' ? 'live' : 'upcoming', winner: null }
+            })}
+            className="text-xs text-blue-400 hover:underline"
+          >
+            Set {match.status === 'upcoming' ? 'Live' : 'Upcoming'}
+          </button>
+        </div>
+      </div>
+
+      <h4 className="text-xl font-display font-bold text-white mb-6 text-center">
+        {match.team1} <span className="text-muted-foreground font-normal text-sm mx-2">vs</span> {match.team2}
+      </h4>
+
+      <div className="space-y-3">
+        <p className="text-sm font-medium text-center text-muted-foreground mb-2">Conclude Match</p>
+        <div>
+          <label className="block text-xs font-medium text-muted-foreground mb-1">Final Score / Result <span className="text-primary/60">(optional)</span></label>
+          <input
+            type="text"
+            placeholder={`e.g. ${match.team1}: 172/4  •  ${match.team2}: 168/8`}
+            value={score}
+            onChange={e => onScoreChange(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg bg-background border border-white/10 text-white text-sm focus:outline-none focus:border-primary mb-2"
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            onClick={() => onSetResult(match.id, match.team1, score)}
+            className="py-2 px-3 rounded-lg border border-white/10 hover:border-primary hover:bg-primary/10 transition-colors text-sm font-semibold"
+          >
+            {match.team1} Won
+          </button>
+          <button
+            onClick={() => onSetResult(match.id, match.team2, score)}
+            className="py-2 px-3 rounded-lg border border-white/10 hover:border-primary hover:bg-primary/10 transition-colors text-sm font-semibold"
+          >
+            {match.team2} Won
+          </button>
+        </div>
+        <button
+          onClick={() => onSetResult(match.id, null, score)}
+          className="w-full py-2 px-3 rounded-lg border border-white/10 hover:border-white/30 hover:bg-secondary transition-colors text-sm font-semibold mt-2"
+        >
+          Draw / Cancel
+        </button>
+      </div>
     </div>
   );
 }
