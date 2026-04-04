@@ -21,9 +21,22 @@ function getNotifiedKey(userId: string) {
   return `betzone_notified_${userId}`;
 }
 
+// Try localStorage first, fall back to sessionStorage (for Safari Private mode)
+function getStorage(): Storage | null {
+  try {
+    localStorage.setItem("__test__", "1");
+    localStorage.removeItem("__test__");
+    return localStorage;
+  } catch {
+    try { return sessionStorage; } catch { return null; }
+  }
+}
+
 function getNotifiedIds(userId: string): Set<number> {
   try {
-    const raw = localStorage.getItem(getNotifiedKey(userId));
+    const store = getStorage();
+    if (!store) return new Set();
+    const raw = store.getItem(getNotifiedKey(userId));
     if (!raw) return new Set();
     return new Set(JSON.parse(raw) as number[]);
   } catch {
@@ -32,9 +45,15 @@ function getNotifiedIds(userId: string): Set<number> {
 }
 
 function markNotified(userId: string, ids: number[]) {
-  const existing = getNotifiedIds(userId);
-  ids.forEach(id => existing.add(id));
-  localStorage.setItem(getNotifiedKey(userId), JSON.stringify([...existing]));
+  try {
+    const store = getStorage();
+    if (!store) return;
+    const existing = getNotifiedIds(userId);
+    ids.forEach(id => existing.add(id));
+    store.setItem(getNotifiedKey(userId), JSON.stringify([...existing]));
+  } catch {
+    // storage write failed — silent, notification just may show again next session
+  }
 }
 
 export function SettlementNotification() {
@@ -66,6 +85,7 @@ export function SettlementNotification() {
     setVisible(true);
   }, [bets, user?.id]);
 
+  // Confetti on win
   useEffect(() => {
     if (!visible || wonBets.length === 0 || confettiFired.current) return;
     confettiFired.current = true;
@@ -85,8 +105,23 @@ export function SettlementNotification() {
     fire(0.1,  { spread: 120, startVelocity: 45, colors: ["#ffffff", "#FFD700"] });
   }, [visible, wonBets]);
 
+  // Escape key to dismiss
+  useEffect(() => {
+    if (!visible) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") dismiss(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [visible]);
+
   function dismiss() {
-    if (!user?.id) return;
+    if (!user?.id) {
+      // Even if user id is missing, force-close the modal
+      setVisible(false);
+      setWonBets([]);
+      setLostBets([]);
+      confettiFired.current = false;
+      return;
+    }
     const allIds = [...wonBets, ...lostBets].map(b => b.id);
     markNotified(user.id, allIds);
     setVisible(false);
@@ -102,21 +137,27 @@ export function SettlementNotification() {
   const netProfit = totalPayout - totalStaked;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-      {/* Backdrop */}
+    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 9999 }}>
+      {/* Backdrop — sits BEHIND the modal via z-index, no backdrop-filter to avoid Safari stacking bug */}
       <div
-        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+        className="absolute inset-0 bg-black/75"
+        style={{ zIndex: 0 }}
         onClick={dismiss}
       />
 
-      {/* Modal */}
-      <div className="relative w-full max-w-md rounded-2xl border border-white/10 shadow-2xl overflow-hidden">
-        {/* Close */}
+      {/* Modal — explicitly above backdrop */}
+      <div
+        className="relative w-full max-w-md rounded-2xl border border-white/10 shadow-2xl overflow-hidden"
+        style={{ zIndex: 1 }}
+      >
+        {/* Close button — large tap target for mobile */}
         <button
           onClick={dismiss}
-          className="absolute top-3 right-3 z-10 p-1.5 rounded-full bg-white/10 hover:bg-white/20 transition-colors"
+          aria-label="Close"
+          className="absolute top-3 right-3 p-2 rounded-full bg-black/40 hover:bg-black/60 transition-colors"
+          style={{ zIndex: 2 }}
         >
-          <X className="h-4 w-4 text-white" />
+          <X className="h-5 w-5 text-white" />
         </button>
 
         {/* Won section */}
@@ -148,12 +189,10 @@ export function SettlementNotification() {
               ))}
             </div>
 
-            {wonBets.length > 0 && (
-              <div className="bg-yellow-500/15 border border-yellow-500/30 rounded-xl px-4 py-3">
-                <p className="text-xs text-yellow-300/70 mb-0.5">Net Profit</p>
-                <p className="text-3xl font-black text-yellow-300">+{formatCurrency(netProfit)}</p>
-              </div>
-            )}
+            <div className="bg-yellow-500/15 border border-yellow-500/30 rounded-xl px-4 py-3">
+              <p className="text-xs text-yellow-300/70 mb-0.5">Net Profit</p>
+              <p className="text-3xl font-black text-yellow-300">+{formatCurrency(netProfit)}</p>
+            </div>
           </div>
         )}
 
@@ -186,11 +225,11 @@ export function SettlementNotification() {
           </div>
         )}
 
-        {/* Dismiss button */}
-        <div className="bg-gray-900/95 border-t border-white/5 px-6 py-4">
+        {/* Dismiss button — full-width, easy to tap */}
+        <div className="bg-gray-900 border-t border-white/5 px-6 py-4">
           <button
             onClick={dismiss}
-            className="w-full py-2.5 rounded-xl font-bold text-sm bg-white/10 hover:bg-white/15 text-white transition-colors"
+            className="w-full py-3 rounded-xl font-bold text-base bg-white/10 hover:bg-white/20 active:bg-white/25 text-white transition-colors"
           >
             Got it!
           </button>
