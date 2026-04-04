@@ -6,6 +6,7 @@ import { useAuth } from "@workspace/replit-auth-web";
 import { Loader2 } from "lucide-react";
 
 import { Navbar } from "@/components/Navbar";
+import { SettlementNotification } from "@/components/SettlementNotification";
 import Login from "@/pages/Login";
 import Matches from "@/pages/Matches";
 import MyBets from "@/pages/MyBets";
@@ -98,6 +99,7 @@ function App() {
           <Router />
         </WouterRouter>
         <Toaster />
+        <SettlementNotification />
       </TooltipProvider>
     </QueryClientProvider>
   );

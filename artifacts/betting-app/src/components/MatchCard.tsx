@@ -128,7 +128,8 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
         `${BASE}/api/scores?team1=${encodeURIComponent(match.team1)}&team2=${encodeURIComponent(match.team2)}&matchId=${match.id}&matchStatus=${match.status}`,
         { credentials: "include" }
       ).then(r => r.json()),
-    enabled: !savedJsonScore && (isLive || isFinished),
+    // Live: always fetch. Finished: only fetch if no score at all saved yet.
+    enabled: isLive || (isFinished && !match.score),
     staleTime: isLive ? 0 : Infinity,
     refetchOnWindowFocus: isLive,
   });
