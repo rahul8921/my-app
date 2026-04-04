@@ -37,8 +37,7 @@ async function getMatchWithTotals(matchId: number) {
 }
 
 router.get("/matches", async (req: Request, res: Response) => {
-  // Sync with CricAPI on every request (throttled to once per 2 min internally)
-  // await so returned data is always fresh
+  // Sync with CricAPI on every page load — settle bets if any match finished
   await syncMatchesNow().catch(() => {});
 
   const matches = await db.select().from(matchesTable);

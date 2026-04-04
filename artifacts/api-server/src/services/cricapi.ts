@@ -169,24 +169,12 @@ async function fetchFromLocalProxy(team1: string, team2: string): Promise<ProxyR
   }
 }
 
-// ── Main sync with cooldown ──────────────────────────────────────────────────
-// Only runs when someone loads the Matches page. Cooldown prevents excessive API calls.
-// At most ~48 calls/day even with constant page refreshes.
-let lastSyncTime = 0;
-const SYNC_COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes
-
-export async function syncMatchesNow(force = false): Promise<void> {
+export async function syncMatchesNow(): Promise<void> {
   const apiKey = process.env["CRICAPI_KEY"];
   if (!apiKey) {
     logger.warn("CRICAPI_KEY not set — skipping CricAPI sync");
     return;
   }
-
-  const now = Date.now();
-  if (!force && now - lastSyncTime < SYNC_COOLDOWN_MS) {
-    return;
-  }
-  lastSyncTime = now;
 
   try {
     logger.info("CricAPI: syncing match results via series_info + match_info…");
