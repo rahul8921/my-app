@@ -113,9 +113,7 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
   const isLive = match.status === "live";
   const isFinished = match.status === "finished";
 
-  // Live scores: always fresh on page load (staleTime: 0)
-  // Finished scores: DB-first, call CricAPI once if not saved (staleTime: Infinity)
-  // Live scorecard: current batsmen + bowler
+  // Live scorecard: current batsmen + bowler — fetched once on page load, no auto-refresh
   const { data: scorecardData } = useQuery<{
     found: boolean;
     matchStatus?: string;
@@ -129,11 +127,14 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
       fetch(`${BASE}/api/scorecard?matchId=${match.id}`, { credentials: "include" })
         .then(r => r.json()),
     enabled: isLive,
-    staleTime: 0,
-    refetchInterval: isLive ? 30_000 : false,
-    refetchOnWindowFocus: isLive,
+    staleTime: Infinity,
+    refetchInterval: false,
+    refetchOnWindowFocus: false,
   });
 
+  // Score data — fetched once on page load, no auto-refresh
+  // The backend sync already stores live scores in DB on each /api/matches call,
+  // so /api/scores just reads from DB (no extra CricAPI call).
   const { data: scoreData, isFetching: scoreFetching } = useQuery<{
     found: boolean;
     status?: string;
@@ -141,18 +142,14 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
     team2Score?: string;
     result?: string;
   }>({
-    queryKey: ["/api/scores", match.team1, match.team2, match.status],
+    queryKey: ["/api/scores", match.team1, match.team2, match.status, match.score],
     queryFn: () =>
-      fetch(
-        `${BASE}/api/scores?team1=${encodeURIComponent(match.team1)}&team2=${encodeURIComponent(match.team2)}&matchId=${match.id}&matchStatus=${match.status}`,
-        { credentials: "include" }
-      ).then(r => r.json()),
-    // Live: always fetch. Finished: only fetch if no score at all saved yet.
+      fetch(`${BASE}/api/scores?matchId=${match.id}`, { credentials: "include" })
+        .then(r => r.json()),
     enabled: isLive || (isFinished && !match.score),
-    staleTime: isLive ? 0 : Infinity,
-    refetchOnWindowFocus: isLive,
-    // Auto-refresh every 30s while match is live
-    refetchInterval: isLive ? 30_000 : false,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchInterval: false,
   });
 
   const liveScores = savedJsonScore

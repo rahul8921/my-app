@@ -286,25 +286,32 @@ export async function syncMatchesNow(): Promise<void> {
           `CricAPI: cricScore found ${dbMatch.team1} vs ${dbMatch.team2}: ms="${liveEntry.ms}"`,
         );
 
-        if (liveEntry.ms === "live" && dbMatch.status !== "live") {
-          updates["status"] = "live";
+        // Determine team order in the cricScore entry (forward or reversed)
+        const { name: n1, abbr: a1 } = parseCricApiTeam(liveEntry.t1);
+        const isForward = teamNamesMatch(dbMatch.team1, n1) || teamNamesMatch(dbMatch.team1, a1);
+        const team1Score = isForward ? (liveEntry.t1s ?? "") : (liveEntry.t2s ?? "");
+        const team2Score = isForward ? (liveEntry.t2s ?? "") : (liveEntry.t1s ?? "");
 
-        } else if ((liveEntry.ms === "result" || liveEntry.ms === "completed") && dbMatch.status !== "finished") {
-          // Determine forward or reverse team order in the entry
-          const { name: n1, abbr: a1 } = parseCricApiTeam(liveEntry.t1);
-          const isForward = teamNamesMatch(dbMatch.team1, n1) || teamNamesMatch(dbMatch.team1, a1);
-          const team1Score = isForward ? (liveEntry.t1s ?? "") : (liveEntry.t2s ?? "");
-          const team2Score = isForward ? (liveEntry.t2s ?? "") : (liveEntry.t1s ?? "");
-          const result = liveEntry.status ?? "";
+        if (liveEntry.ms === "live") {
+          // Transition upcoming → live
+          if (dbMatch.status !== "live") updates["status"] = "live";
+          // Always persist the latest live score so /api/scores can read from DB
+          if (team1Score || team2Score) {
+            updates["score"] = JSON.stringify({ team1Score, team2Score });
+          }
 
-          updates["status"] = "finished";
-          updates["score"] = JSON.stringify({ team1Score, team2Score, result });
+        } else if (liveEntry.ms === "result" || liveEntry.ms === "completed") {
+          if (dbMatch.status !== "finished") {
+            const result = liveEntry.status ?? "";
+            updates["status"] = "finished";
+            updates["score"] = JSON.stringify({ team1Score, team2Score, result });
 
-          const winner = resolveWinner(result, dbMatch.team1, dbMatch.team2);
-          if (winner) {
-            updates["winner"] = winner;
-            if (dbMatch.winner !== winner) {
-              await settleMatchBets(dbMatch.id, winner);
+            const winner = resolveWinner(result, dbMatch.team1, dbMatch.team2);
+            if (winner) {
+              updates["winner"] = winner;
+              if (dbMatch.winner !== winner) {
+                await settleMatchBets(dbMatch.id, winner);
+              }
             }
           }
         }

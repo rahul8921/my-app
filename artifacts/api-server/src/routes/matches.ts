@@ -353,154 +353,34 @@ router.patch("/matches/:matchId/result", async (req: Request, res: Response) => 
   });
 });
 
-// ── IPL team name → abbreviation lookup ────────────────────────────────────
-const IPL_ABBREV: Record<string, string[]> = {
-  CSK:  ["chennai"],
-  MI:   ["mumbai"],
-  RCB:  ["royal challengers", "bengaluru", "bangalore"],
-  KKR:  ["kolkata"],
-  SRH:  ["sunrisers", "hyderabad"],
-  DC:   ["delhi capitals"],
-  PBKS: ["punjab kings", "kings xi"],
-  RR:   ["rajasthan"],
-  GT:   ["gujarat"],
-  LSG:  ["lucknow"],
-};
-
-function resolveAbbrev(fullName: string): string | null {
-  const lower = fullName.toLowerCase();
-  for (const [abbrev, keywords] of Object.entries(IPL_ABBREV)) {
-    if (keywords.some(k => lower.includes(k))) return abbrev;
-  }
-  // direct abbrev match (e.g. "CSK")
-  const up = fullName.trim().toUpperCase();
-  if (IPL_ABBREV[up]) return up;
-  return null;
-}
-
 // ── Live score via CricAPI (cricScore endpoint) ───────────────────────────────
-// GET /api/scores?team1=CSK&team2=RR[&matchId=3]
-// • Finished matches: DB-first — if JSON score already saved, return immediately.
-//   Otherwise call CricAPI once, save to DB, never call again.
-// • Live matches: always call CricAPI fresh (no caching).
+// GET /api/scores?matchId=3
+// Reads the score stored in DB by syncMatchesNow — zero extra CricAPI calls.
+// syncMatchesNow (called on every /api/matches request) keeps the score fresh.
 router.get("/scores", async (req: Request, res: Response) => {
-  const team1 = (req.query["team1"] as string || "").trim().toUpperCase();
-  const team2 = (req.query["team2"] as string || "").trim().toUpperCase();
   const matchId = req.query["matchId"] ? Number(req.query["matchId"]) : null;
-  const matchStatus = (req.query["matchStatus"] as string || "").toLowerCase();
+  if (!matchId) return res.status(400).json({ error: "matchId required" });
 
-  if (!team1 || !team2) {
-    return res.status(400).json({ error: "team1 and team2 required" });
-  }
+  const [dbMatch] = await db.select().from(matchesTable).where(eq(matchesTable.id, matchId));
+  if (!dbMatch) return res.status(404).json({ error: "match not found" });
 
-  // ── For finished matches: check DB first ────────────────────────────────────
-  if (matchId && matchStatus === "finished") {
-    const [existingMatch] = await db.select().from(matchesTable).where(eq(matchesTable.id, matchId));
-    if (existingMatch?.score) {
-      try {
-        const saved = JSON.parse(existingMatch.score) as { team1Score?: string; team2Score?: string; result?: string };
-        if (saved.team1Score || saved.team2Score) {
-          console.log(`[scores] ← served from DB for match ${matchId}`);
-          return res.json({ found: true, status: "completed", team1Score: saved.team1Score ?? "", team2Score: saved.team2Score ?? "", result: saved.result ?? "" });
-        }
-      } catch { /* not JSON — fall through to API */ }
-    }
-  }
-
-  const apiKey = process.env["CRICAPI_KEY"];
-  if (!apiKey) {
-    return res.json({ found: false, reason: "no_api_key" });
+  if (!dbMatch.score) {
+    return res.json({ found: false, reason: "no_score_yet" });
   }
 
   try {
-    const url = `https://api.cricapi.com/v1/cricScore?apikey=${apiKey}`;
-    console.log(`[scores] → calling CricAPI cricScore for ${team1} vs ${team2}`);
-    const upstream = await fetch(url, { signal: AbortSignal.timeout(10000) });
-    if (!upstream.ok) {
-      console.log(`[scores] ← CricAPI HTTP error: ${upstream.status}`);
-      return res.json({ found: false, reason: "api_error" });
-    }
-
-    const data = await upstream.json() as { data?: Array<{
-      t1: string; t2: string; t1s?: string; t2s?: string;
-      ms: string; status?: string;
-    }> };
-
-    const matches = data.data ?? [];
-
-    let team1Score = "";
-    let team2Score = "";
-    let resultStatus = "";
-    let apiMatchStatus = "";
-
-    for (const m of matches) {
-      // Resolve each CricAPI team name to an IPL abbreviation using all available signals:
-      // 1) explicit bracket abbrev "Chennai Super Kings [CSK]" → "CSK"
-      // 2) fuzzy keyword lookup via resolveAbbrev ("chennai" → "CSK")
-      // 3) fall back to the raw name for a final direct comparison
-      const t1Raw = m.t1.trim();
-      const t2Raw = m.t2.trim();
-      const t1Abbr = ((m.t1.match(/\[(.*?)\]/) ?? [])[1] ?? "").toUpperCase();
-      const t2Abbr = ((m.t2.match(/\[(.*?)\]/) ?? [])[1] ?? "").toUpperCase();
-      const t1Name = t1Raw.replace(/\[.*?\]/g, "").trim();
-      const t2Name = t2Raw.replace(/\[.*?\]/g, "").trim();
-
-      // Resolved abbreviation: bracket > keyword > raw abbrev > null
-      const resolveTeam = (name: string, bracketAbbr: string): string => {
-        if (bracketAbbr) return bracketAbbr;
-        const kw = resolveAbbrev(name);
-        if (kw) return kw;
-        return name.toUpperCase();
-      };
-
-      const apiTeam1 = resolveTeam(t1Name, t1Abbr);
-      const apiTeam2 = resolveTeam(t2Name, t2Abbr);
-
-      const isDirectMatch = apiTeam1 === team1 && apiTeam2 === team2;
-      const isReverseMatch = apiTeam1 === team2 && apiTeam2 === team1;
-
-      if (!isDirectMatch && !isReverseMatch) continue;
-
-      apiMatchStatus = m.ms; // "fixture" | "live" | "result"
-
-      if (m.ms === "fixture") {
-        // Not started yet — no scores
-        return res.json({ found: true, status: "scheduled", team1Score: "", team2Score: "", result: "" });
-      }
-
-      // Assign scores respecting team order
-      team1Score = isDirectMatch ? (m.t1s ?? "") : (m.t2s ?? "");
-      team2Score = isDirectMatch ? (m.t2s ?? "") : (m.t1s ?? "");
-
-      if (m.ms === "result" || m.ms === "completed") {
-        resultStatus = m.status ?? "";
-      }
-      break;
-    }
-
-    if (!team1Score && !team2Score && !resultStatus) {
-      console.log(`[scores] ← no match found in CricAPI for ${team1} vs ${team2}`);
-      return res.json({ found: false, status: "not_found" });
-    }
-
-    const isCompleted = apiMatchStatus === "result" || apiMatchStatus === "completed";
-    console.log(`[scores] ← ${apiMatchStatus}: ${team1}=${team1Score} ${team2}=${team2Score} result="${resultStatus}"`);
-
-    // ── For finished matches: persist to DB so we never call again ──────────────
-    if (matchId && isCompleted && (team1Score || team2Score)) {
-      try {
-        await db.update(matchesTable)
-          .set({ score: JSON.stringify({ team1Score, team2Score, result: resultStatus }) })
-          .where(eq(matchesTable.id, matchId));
-        console.log(`[scores] ✓ saved final scores to DB for match ${matchId}`);
-      } catch (saveErr) {
-        console.error(`[scores] failed to save scores for match ${matchId}:`, saveErr);
-      }
-    }
-
-    return res.json({ found: true, status: isCompleted ? "completed" : "live", team1Score, team2Score, result: resultStatus });
-  } catch (err) {
-    return res.json({ found: false, reason: "timeout" });
+    const saved = JSON.parse(dbMatch.score) as { team1Score?: string; team2Score?: string; result?: string };
+    const isFinished = dbMatch.status === "finished";
+    return res.json({
+      found: true,
+      status: isFinished ? "completed" : "live",
+      team1Score: saved.team1Score ?? "",
+      team2Score: saved.team2Score ?? "",
+      result: saved.result ?? "",
+    });
+  } catch {
+    // Plain-text score (legacy format)
+    return res.json({ found: true, status: dbMatch.status, team1Score: dbMatch.score, team2Score: "", result: "" });
   }
 });
 
