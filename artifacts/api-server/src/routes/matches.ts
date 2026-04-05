@@ -7,7 +7,7 @@ import {
   SetMatchResultParams,
   GetMatchParams,
 } from "@workspace/api-zod";
-import { syncMatchesNow } from "../services/cricapi";
+import { syncMatchesNow, cricApiGet } from "../services/cricapi";
 
 const router: IRouter = Router();
 
@@ -400,54 +400,24 @@ router.get("/scorecard", async (req: Request, res: Response) => {
     return res.json({ found: false, reason: "no_match_id" });
   }
 
-  const apiKey = process.env["CRICAPI_KEY"];
-  if (!apiKey) return res.json({ found: false, reason: "no_api_key" });
-
   try {
-    const url = `https://api.cricapi.com/v1/match_score?apikey=${apiKey}&id=${cricId}`;
     console.log(`[scorecard] → calling match_score for match ${matchId} (cricId=${cricId})`);
-    const upstream = await fetch(url, { signal: AbortSignal.timeout(10000) });
-    if (!upstream.ok) {
-      console.log(`[scorecard] ← CricAPI HTTP error: ${upstream.status}`);
-      return res.json({ found: false, reason: "api_error" });
-    }
-
-    const data = await upstream.json() as {
-      status: string;
-      data?: {
-        id: string;
-        name: string;
-        status: string;
-        score?: Array<{ r: number; w: number; o: number; inning: string }>;
-        scorecard?: Array<{
-          inning: string;
-          batting: Array<{
-            batsman: string;
-            "dismissal-text"?: string;
-            r: number;
-            b: number;
-            "4s": number;
-            "6s": number;
-            sr: string | number;
-          }>;
-          bowling: Array<{
-            bowler: string;
-            o: string | number;
-            m: number;
-            r: number;
-            w: number;
-            eco: string | number;
-          }>;
-        }>;
-      };
-    };
-
-    if (data.status !== "success" || !data.data) {
-      console.log(`[scorecard] ← CricAPI failure: ${data.status}`);
+    const result = await cricApiGet("match_score", { id: cricId });
+    if (!result) {
+      console.log(`[scorecard] ← all API keys exhausted`);
       return res.json({ found: false, reason: "api_failure" });
     }
 
-    const match = data.data;
+    type ScorecardData = {
+      id: string; name: string; status: string;
+      score?: Array<{ r: number; w: number; o: number; inning: string }>;
+      scorecard?: Array<{
+        inning: string;
+        batting: Array<{ batsman: string; "dismissal-text"?: string; r: number; b: number; "4s": number; "6s": number; sr: string | number }>;
+        bowling: Array<{ bowler: string; o: string | number; m: number; r: number; w: number; eco: string | number }>;
+      }>;
+    };
+    const match = result.data as ScorecardData;
     const innings = match.scorecard ?? [];
 
     // Current innings = last one in the scorecard (most recent)

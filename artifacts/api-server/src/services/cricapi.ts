@@ -7,6 +7,48 @@ const CRICAPI_BASE = "https://api.cricapi.com/v1";
 // IPL 2026 series ID on CricAPI
 const IPL_2026_SERIES_ID = "87c62aac-bc3c-4738-ab93-19da0690488f";
 
+// ── Dual-key fallback ────────────────────────────────────────────────────────
+// Returns the API response JSON, trying CRICAPI_KEY first then CRICAPI_KEY_2.
+// A "failure" status from the API (quota exhausted) triggers the fallback.
+export async function cricApiGet(endpoint: string, params: Record<string, string> = {}): Promise<{ data: unknown; status: string; usedKey: string } | null> {
+  const keys = [
+    process.env["CRICAPI_KEY"],
+    process.env["CRICAPI_KEY_2"],
+  ].filter(Boolean) as string[];
+
+  if (keys.length === 0) {
+    logger.warn("No CricAPI keys configured");
+    return null;
+  }
+
+  const queryString = Object.entries(params)
+    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
+    .join("&");
+
+  for (const key of keys) {
+    try {
+      const url = `${CRICAPI_BASE}/${endpoint}?apikey=${key}${queryString ? "&" + queryString : ""}`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+      if (!res.ok) {
+        logger.warn(`CricAPI ${endpoint}: HTTP ${res.status} with key ending ...${key.slice(-4)}`);
+        continue;
+      }
+      const json = await res.json() as { status: string; data?: unknown };
+      if (json.status === "failure") {
+        logger.warn(`CricAPI ${endpoint}: key ...${key.slice(-4)} quota exhausted — trying next key`);
+        continue;
+      }
+      logger.debug(`CricAPI ${endpoint}: success with key ...${key.slice(-4)}`);
+      return { data: json.data, status: json.status, usedKey: key };
+    } catch (err) {
+      logger.warn({ err }, `CricAPI ${endpoint}: request failed with key ...${key.slice(-4)}`);
+    }
+  }
+
+  logger.error(`CricAPI ${endpoint}: all keys exhausted or failed`);
+  return null;
+}
+
 const IPL_KEYWORDS: Record<string, string[]> = {
   RCB: ["royal challengers", "rcb", "bengaluru", "bangalore"],
   SRH: ["sunrisers", "srh", "hyderabad"],
@@ -65,33 +107,28 @@ let seriesMatchCache: CricApiMatch[] = [];
 let seriesCacheTime = 0;
 const SERIES_CACHE_TTL = 6 * 60 * 60 * 1000; // 6 hours
 
-async function fetchSeriesMatches(apiKey: string): Promise<CricApiMatch[]> {
+async function fetchSeriesMatches(): Promise<CricApiMatch[]> {
   const now = Date.now();
   if (seriesMatchCache.length > 0 && now - seriesCacheTime < SERIES_CACHE_TTL) {
     return seriesMatchCache;
   }
 
-  const url = `${CRICAPI_BASE}/series_info?apikey=${apiKey}&id=${IPL_2026_SERIES_ID}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`CricAPI series_info HTTP ${res.status}`);
-  const data = await res.json() as { status: string; data?: { matchList?: CricApiMatch[] } };
-  if (data.status !== "success" || !data.data) throw new Error("CricAPI series_info failed");
+  const result = await cricApiGet("series_info", { id: IPL_2026_SERIES_ID });
+  if (!result) throw new Error("CricAPI series_info: all keys failed");
+  const d = result.data as { matchList?: CricApiMatch[] } | undefined;
 
-  seriesMatchCache = data.data.matchList ?? [];
+  seriesMatchCache = d?.matchList ?? [];
   seriesCacheTime = now;
   logger.info({ count: seriesMatchCache.length }, "CricAPI: loaded IPL 2026 series match list");
   return seriesMatchCache;
 }
 
 // ── Individual match info ────────────────────────────────────────────────────
-async function fetchMatchInfo(apiKey: string, matchId: string): Promise<CricApiMatch | null> {
+async function fetchMatchInfo(matchId: string): Promise<CricApiMatch | null> {
   try {
-    const url = `${CRICAPI_BASE}/match_info?apikey=${apiKey}&id=${matchId}`;
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const data = await res.json() as { status: string; data?: CricApiMatch };
-    if (data.status !== "success" || !data.data) return null;
-    return data.data;
+    const result = await cricApiGet("match_info", { id: matchId });
+    if (!result) return null;
+    return result.data as CricApiMatch;
   } catch {
     return null;
   }
@@ -219,9 +256,9 @@ function resolveWinner(statusText: string, dbTeam1: string, dbTeam2: string): st
 }
 
 export async function syncMatchesNow(): Promise<void> {
-  const apiKey = process.env["CRICAPI_KEY"];
-  if (!apiKey) {
-    logger.warn("CRICAPI_KEY not set — skipping CricAPI sync");
+  const hasAnyKey = process.env["CRICAPI_KEY"] || process.env["CRICAPI_KEY_2"];
+  if (!hasAnyKey) {
+    logger.warn("No CricAPI keys configured — skipping sync");
     return;
   }
 
@@ -253,13 +290,12 @@ export async function syncMatchesNow(): Promise<void> {
     // ── Step 1: cricScore — real-time live/result status for ALL ongoing matches ──
     let cricScoreEntries: CricScoreEntry[] = [];
     try {
-      const res = await fetch(`${CRICAPI_BASE}/cricScore?apikey=${apiKey}`, {
-        signal: AbortSignal.timeout(10000),
-      });
-      if (res.ok) {
-        const data = await res.json() as { data?: CricScoreEntry[] };
-        cricScoreEntries = data.data ?? [];
+      const result = await cricApiGet("cricScore");
+      if (result) {
+        cricScoreEntries = (result.data as CricScoreEntry[]) ?? [];
         logger.info(`CricAPI: cricScore returned ${cricScoreEntries.length} live entries`);
+      } else {
+        logger.warn("CricAPI: cricScore — all keys failed, will fall back to match_info");
       }
     } catch (err) {
       logger.warn({ err }, "CricAPI: cricScore call failed, will fall back to match_info");
@@ -268,7 +304,7 @@ export async function syncMatchesNow(): Promise<void> {
     // ── Step 2: series_info — for match IDs (cached 6 h) ──────────────────────
     let seriesMatches: CricApiMatch[] = [];
     try {
-      seriesMatches = await fetchSeriesMatches(apiKey);
+      seriesMatches = await fetchSeriesMatches();
     } catch (err) {
       logger.warn({ err }, "CricAPI: series_info failed, will skip match_info fallback");
     }
@@ -334,7 +370,7 @@ export async function syncMatchesNow(): Promise<void> {
             updates["cricapi_match_id"] = seriesMatch.id;
           }
 
-          const matchInfo = await fetchMatchInfo(apiKey, seriesMatch.id);
+          const matchInfo = await fetchMatchInfo(seriesMatch.id);
           const apiMatch = matchInfo ?? seriesMatch;
 
           const scoreStr = buildScoreString(apiMatch.score);
