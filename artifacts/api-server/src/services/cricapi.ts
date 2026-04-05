@@ -59,11 +59,6 @@ interface CricApiMatch {
   matchEnded?: boolean;
 }
 
-// ── Sync cooldown ────────────────────────────────────────────────────────────
-// At most one CricAPI call per minute, regardless of how many users load the page
-let lastSyncAt = 0;
-const SYNC_COOLDOWN_MS = 60 * 1000; // 60 seconds
-
 // ── Series match list cache ──────────────────────────────────────────────────
 // Cached list of all IPL 2026 matches from series_info
 let seriesMatchCache: CricApiMatch[] = [];
@@ -251,13 +246,6 @@ export async function syncMatchesNow(): Promise<void> {
   if (pastMatches.length === 0) {
     return; // all matches are still in the future — no CricAPI call needed
   }
-
-  // ── Cooldown: at most one CricAPI call per minute ────────────────────────
-  if (now - lastSyncAt < SYNC_COOLDOWN_MS) {
-    logger.debug("CricAPI: skipping sync — cooldown active");
-    return;
-  }
-  lastSyncAt = now; // claim the slot before any await so concurrent requests skip
 
   try {
     logger.info(`CricAPI: syncing ${pastMatches.length} past-scheduled match(es)…`);
