@@ -169,6 +169,55 @@ async function fetchFromLocalProxy(team1: string, team2: string): Promise<ProxyR
   }
 }
 
+// ── CricScore live match type ─────────────────────────────────────────────────
+interface CricScoreEntry {
+  t1: string;   // e.g. "Chennai Super Kings [CSK]"
+  t2: string;
+  t1s?: string; // score string
+  t2s?: string;
+  ms: string;   // "fixture" | "live" | "result"
+  status?: string; // result text e.g. "CSK won by 8 wkts"
+}
+
+/** Pull team name + abbreviation out of a CricAPI team string like "CSK [CSK]" */
+function parseCricApiTeam(raw: string): { name: string; abbr: string } {
+  const abbr = (raw.match(/\[(.*?)\]/) ?? [])[1] ?? "";
+  const name = raw.replace(/\[.*?\]/g, "").trim();
+  return { name, abbr };
+}
+
+/** Find a cricScore entry matching two DB team names */
+function findCricScoreEntry(
+  entries: CricScoreEntry[],
+  dbTeam1: string,
+  dbTeam2: string,
+): CricScoreEntry | undefined {
+  return entries.find(e => {
+    const { name: n1, abbr: a1 } = parseCricApiTeam(e.t1);
+    const { name: n2, abbr: a2 } = parseCricApiTeam(e.t2);
+    const fwd = (teamNamesMatch(dbTeam1, n1) || teamNamesMatch(dbTeam1, a1)) &&
+                (teamNamesMatch(dbTeam2, n2) || teamNamesMatch(dbTeam2, a2));
+    const rev = (teamNamesMatch(dbTeam1, n2) || teamNamesMatch(dbTeam1, a2)) &&
+                (teamNamesMatch(dbTeam2, n1) || teamNamesMatch(dbTeam2, a1));
+    return fwd || rev;
+  });
+}
+
+/** Determine which DB team won from a result status string */
+function resolveWinner(statusText: string, dbTeam1: string, dbTeam2: string): string | null {
+  const lower = statusText.toLowerCase();
+  if (!lower.includes("won")) return null;
+  // Check full name match
+  if (lower.includes(dbTeam1.toLowerCase())) return dbTeam1;
+  if (lower.includes(dbTeam2.toLowerCase())) return dbTeam2;
+  // Check abbreviation match
+  const k1 = resolveKey(dbTeam1);
+  const k2 = resolveKey(dbTeam2);
+  if (k1 && lower.includes(k1.toLowerCase())) return dbTeam1;
+  if (k2 && lower.includes(k2.toLowerCase())) return dbTeam2;
+  return null;
+}
+
 export async function syncMatchesNow(): Promise<void> {
   const apiKey = process.env["CRICAPI_KEY"];
   if (!apiKey) {
@@ -177,12 +226,9 @@ export async function syncMatchesNow(): Promise<void> {
   }
 
   try {
-    logger.info("CricAPI: syncing match results via series_info + match_info…");
+    logger.info("CricAPI: syncing match statuses…");
 
-    // Step 1: Get all IPL 2026 match IDs from series_info (cached 6h)
-    const seriesMatches = await fetchSeriesMatches(apiKey);
-
-    // Step 2: Get active DB matches
+    // Fetch all upcoming/live DB matches
     const dbMatches = await db
       .select()
       .from(matchesTable)
@@ -193,83 +239,132 @@ export async function syncMatchesNow(): Promise<void> {
       return;
     }
 
-    // Step 3: For each DB match, find corresponding CricAPI match ID
-    let updated = 0;
-    for (const dbMatch of dbMatches) {
-      const matchTimestamp = new Date(dbMatch.matchDate).getTime();
+    const now = Date.now();
 
-      // Find best matching series match (by teams + date within 48h)
-      const seriesMatch = seriesMatches.find(sm => {
-        if (!sm.teams || sm.teams.length < 2) return false;
-        const apiTs = new Date(sm.dateTimeGMT || sm.date).getTime();
-        if (Math.abs(matchTimestamp - apiTs) > 48 * 60 * 60 * 1000) return false;
-        return (
-          (teamNamesMatch(dbMatch.team1, sm.teams[0]) && teamNamesMatch(dbMatch.team2, sm.teams[1])) ||
-          (teamNamesMatch(dbMatch.team1, sm.teams[1]) && teamNamesMatch(dbMatch.team2, sm.teams[0]))
-        );
+    // Only process matches whose scheduled time has already passed (5-min grace)
+    const pastMatches = dbMatches.filter(
+      m => new Date(m.matchDate).getTime() < now - 5 * 60 * 1000,
+    );
+
+    if (pastMatches.length === 0) {
+      logger.info("CricAPI: no matches past schedule yet — nothing to sync");
+      return;
+    }
+
+    // ── Step 1: cricScore — real-time live/result status for ALL ongoing matches ──
+    let cricScoreEntries: CricScoreEntry[] = [];
+    try {
+      const res = await fetch(`${CRICAPI_BASE}/cricScore?apikey=${apiKey}`, {
+        signal: AbortSignal.timeout(10000),
       });
-
-      if (!seriesMatch) {
-        logger.debug(`CricAPI: no series match found for ${dbMatch.team1} vs ${dbMatch.team2}`);
-        continue;
+      if (res.ok) {
+        const data = await res.json() as { data?: CricScoreEntry[] };
+        cricScoreEntries = data.data ?? [];
+        logger.info(`CricAPI: cricScore returned ${cricScoreEntries.length} live entries`);
       }
+    } catch (err) {
+      logger.warn({ err }, "CricAPI: cricScore call failed, will fall back to match_info");
+    }
 
-      // Step 4a: Try local proxy first (user's machine, residential IP)
-      const proxyResult = await fetchFromLocalProxy(dbMatch.team1, dbMatch.team2);
+    // ── Step 2: series_info — for match IDs (cached 6 h) ──────────────────────
+    let seriesMatches: CricApiMatch[] = [];
+    try {
+      seriesMatches = await fetchSeriesMatches(apiKey);
+    } catch (err) {
+      logger.warn({ err }, "CricAPI: series_info failed, will skip match_info fallback");
+    }
 
+    let updated = 0;
+
+    for (const dbMatch of pastMatches) {
       const updates: Record<string, unknown> = {};
 
-      if (proxyResult && proxyResult.status === "finished" && proxyResult.winner) {
-        // Proxy gave us a definitive result — use it
-        updates["status"] = "finished";
-        updates["winner"] = proxyResult.winner;
-        if (proxyResult.result) updates["score"] = proxyResult.result;
-        else if (proxyResult.scores && proxyResult.scores.length > 0)
-          updates["score"] = proxyResult.scores.join("  •  ");
+      // ── Try cricScore first ──────────────────────────────────────────────────
+      const liveEntry = findCricScoreEntry(cricScoreEntries, dbMatch.team1, dbMatch.team2);
 
-        if (dbMatch.winner !== proxyResult.winner) {
-          await settleMatchBets(dbMatch.id, proxyResult.winner);
-        }
-      } else {
-        // Step 4b: Fall back to CricAPI match_info
-        const matchInfo = await fetchMatchInfo(apiKey, seriesMatch.id);
-        const apiMatch = matchInfo ?? seriesMatch;
+      if (liveEntry) {
+        logger.info(
+          `CricAPI: cricScore found ${dbMatch.team1} vs ${dbMatch.team2}: ms="${liveEntry.ms}"`,
+        );
 
-        const scoreStr = buildScoreString(apiMatch.score);
-        if (scoreStr) updates["score"] = scoreStr;
+        if (liveEntry.ms === "live" && dbMatch.status !== "live") {
+          updates["status"] = "live";
 
-        if (apiMatch.matchEnded) {
+        } else if ((liveEntry.ms === "result" || liveEntry.ms === "completed") && dbMatch.status !== "finished") {
+          // Determine forward or reverse team order in the entry
+          const { name: n1, abbr: a1 } = parseCricApiTeam(liveEntry.t1);
+          const isForward = teamNamesMatch(dbMatch.team1, n1) || teamNamesMatch(dbMatch.team1, a1);
+          const team1Score = isForward ? (liveEntry.t1s ?? "") : (liveEntry.t2s ?? "");
+          const team2Score = isForward ? (liveEntry.t2s ?? "") : (liveEntry.t1s ?? "");
+          const result = liveEntry.status ?? "";
+
           updates["status"] = "finished";
-          const apiWinner = extractWinner(apiMatch.status, apiMatch.teams);
-          if (apiWinner) {
-            const dbWinner = teamNamesMatch(dbMatch.team1, apiWinner) ? dbMatch.team1 : dbMatch.team2;
-            updates["winner"] = dbWinner;
-            if (dbMatch.winner !== dbWinner) {
-              await settleMatchBets(dbMatch.id, dbWinner);
+          updates["score"] = JSON.stringify({ team1Score, team2Score, result });
+
+          const winner = resolveWinner(result, dbMatch.team1, dbMatch.team2);
+          if (winner) {
+            updates["winner"] = winner;
+            if (dbMatch.winner !== winner) {
+              await settleMatchBets(dbMatch.id, winner);
             }
           }
-          if (!scoreStr && apiMatch.status && apiMatch.status.toLowerCase().includes("won")) {
-            updates["score"] = apiMatch.status;
+        }
+      } else {
+        // ── Fallback: series_info + match_info ────────────────────────────────
+        const matchTimestamp = new Date(dbMatch.matchDate).getTime();
+        const seriesMatch = seriesMatches.find(sm => {
+          if (!sm.teams || sm.teams.length < 2) return false;
+          const apiTs = new Date(sm.dateTimeGMT || sm.date).getTime();
+          if (Math.abs(matchTimestamp - apiTs) > 48 * 60 * 60 * 1000) return false;
+          return (
+            (teamNamesMatch(dbMatch.team1, sm.teams[0]) && teamNamesMatch(dbMatch.team2, sm.teams[1])) ||
+            (teamNamesMatch(dbMatch.team1, sm.teams[1]) && teamNamesMatch(dbMatch.team2, sm.teams[0]))
+          );
+        });
+
+        if (seriesMatch) {
+          const matchInfo = await fetchMatchInfo(apiKey, seriesMatch.id);
+          const apiMatch = matchInfo ?? seriesMatch;
+
+          const scoreStr = buildScoreString(apiMatch.score);
+
+          if (apiMatch.matchEnded) {
+            updates["status"] = "finished";
+            if (scoreStr) updates["score"] = scoreStr;
+            else if (apiMatch.status?.toLowerCase().includes("won")) updates["score"] = apiMatch.status;
+
+            const apiWinner = extractWinner(apiMatch.status, apiMatch.teams);
+            if (apiWinner) {
+              const dbWinner = teamNamesMatch(dbMatch.team1, apiWinner) ? dbMatch.team1 : dbMatch.team2;
+              updates["winner"] = dbWinner;
+              if (dbMatch.winner !== dbWinner) {
+                await settleMatchBets(dbMatch.id, dbWinner);
+              }
+            }
+          } else if (apiMatch.matchStarted && dbMatch.status !== "live") {
+            updates["status"] = "live";
+            if (scoreStr) updates["score"] = scoreStr;
           }
-        } else if (proxyResult?.status === "live" || apiMatch.matchStarted) {
-          updates["status"] = "live";
+        } else {
+          logger.debug(
+            `CricAPI: no data found for ${dbMatch.team1} vs ${dbMatch.team2} — not in cricScore or series list`,
+          );
         }
       }
 
       if (Object.keys(updates).length > 0) {
+        updates["updatedAt"] = new Date();
         await db.update(matchesTable)
           .set(updates as never)
           .where(eq(matchesTable.id, dbMatch.id));
         logger.info(
-          `CricAPI: updated match ${dbMatch.id} (${dbMatch.team1} vs ${dbMatch.team2}) → ${JSON.stringify(updates)}`
+          `CricAPI: match ${dbMatch.id} (${dbMatch.team1} vs ${dbMatch.team2}) → ${JSON.stringify(updates)}`,
         );
         updated++;
-      } else {
-        logger.debug(`CricAPI: no changes for ${dbMatch.team1} vs ${dbMatch.team2} (matchEnded=${apiMatch.matchEnded}, status="${apiMatch.status}")`);
       }
     }
 
-    logger.info(`CricAPI: sync complete — ${updated}/${dbMatches.length} match(es) updated`);
+    logger.info(`CricAPI: sync complete — ${updated}/${pastMatches.length} match(es) updated`);
   } catch (err) {
     logger.error({ err }, "CricAPI: sync failed");
   }
