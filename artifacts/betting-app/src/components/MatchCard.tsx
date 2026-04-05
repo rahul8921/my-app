@@ -115,6 +115,25 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
 
   // Live scores: always fresh on page load (staleTime: 0)
   // Finished scores: DB-first, call CricAPI once if not saved (staleTime: Infinity)
+  // Live scorecard: current batsmen + bowler
+  const { data: scorecardData } = useQuery<{
+    found: boolean;
+    matchStatus?: string;
+    currentInnings?: string;
+    batsmen?: Array<{ name: string; runs: number; balls: number; fours: number; sixes: number; sr: string }>;
+    bowler?: { name: string; overs: string; runs: number; wickets: number; economy: string } | null;
+    inningsSummary?: Array<{ inning: string; runs: number; wickets: number; overs: number }>;
+  }>({
+    queryKey: ["/api/scorecard", match.id, match.status],
+    queryFn: () =>
+      fetch(`${BASE}/api/scorecard?matchId=${match.id}`, { credentials: "include" })
+        .then(r => r.json()),
+    enabled: isLive,
+    staleTime: 0,
+    refetchInterval: isLive ? 30_000 : false,
+    refetchOnWindowFocus: isLive,
+  });
+
   const { data: scoreData, isFetching: scoreFetching } = useQuery<{
     found: boolean;
     status?: string;
@@ -452,6 +471,71 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
               </div>
             )}
           </>
+        )}
+
+        {/* Live Scorecard: current batsmen + bowler */}
+        {isLive && scorecardData?.found && (scorecardData.batsmen?.length || scorecardData.bowler) && (
+          <div className="rounded-xl border border-red-500/15 bg-red-500/5 overflow-hidden">
+            {/* Innings header */}
+            {scorecardData.currentInnings && (
+              <div className="flex items-center justify-between px-3 py-1.5 bg-red-500/10 border-b border-red-500/10">
+                <span className="text-[10px] font-black uppercase tracking-widest text-red-400">
+                  🏏 {scorecardData.currentInnings}
+                </span>
+              </div>
+            )}
+
+            <div className="p-2 space-y-2">
+              {/* Batting */}
+              {scorecardData.batsmen && scorecardData.batsmen.length > 0 && (
+                <div>
+                  <div className="grid grid-cols-[1fr_auto_auto_auto_auto_auto] gap-x-2 px-1 mb-1">
+                    <span className="text-[9px] font-bold uppercase text-muted-foreground">Batter</span>
+                    <span className="text-[9px] font-bold uppercase text-muted-foreground text-right">R</span>
+                    <span className="text-[9px] font-bold uppercase text-muted-foreground text-right">B</span>
+                    <span className="text-[9px] font-bold uppercase text-muted-foreground text-right">4s</span>
+                    <span className="text-[9px] font-bold uppercase text-muted-foreground text-right">6s</span>
+                    <span className="text-[9px] font-bold uppercase text-muted-foreground text-right">SR</span>
+                  </div>
+                  {scorecardData.batsmen.map((b, i) => (
+                    <div key={i} className="grid grid-cols-[1fr_auto_auto_auto_auto_auto] gap-x-2 px-1 py-0.5 rounded bg-white/[0.03]">
+                      <span className="text-[11px] font-semibold text-white truncate">{b.name}</span>
+                      <span className="text-[11px] font-bold text-white text-right">{b.runs}</span>
+                      <span className="text-[11px] text-muted-foreground text-right">{b.balls}</span>
+                      <span className="text-[11px] text-blue-400 text-right">{b.fours}</span>
+                      <span className="text-[11px] text-purple-400 text-right">{b.sixes}</span>
+                      <span className="text-[11px] text-yellow-400 text-right">{b.sr}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Divider */}
+              {scorecardData.batsmen?.length > 0 && scorecardData.bowler && (
+                <div className="h-px bg-white/5" />
+              )}
+
+              {/* Bowling */}
+              {scorecardData.bowler && (
+                <div>
+                  <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-x-2 px-1 mb-1">
+                    <span className="text-[9px] font-bold uppercase text-muted-foreground">Bowler</span>
+                    <span className="text-[9px] font-bold uppercase text-muted-foreground text-right">O</span>
+                    <span className="text-[9px] font-bold uppercase text-muted-foreground text-right">R</span>
+                    <span className="text-[9px] font-bold uppercase text-muted-foreground text-right">W</span>
+                    <span className="text-[9px] font-bold uppercase text-muted-foreground text-right">Eco</span>
+                  </div>
+                  <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-x-2 px-1 py-0.5 rounded bg-white/[0.03]">
+                    <span className="text-[11px] font-semibold text-white truncate">{scorecardData.bowler.name}</span>
+                    <span className="text-[11px] text-muted-foreground text-right">{scorecardData.bowler.overs}</span>
+                    <span className="text-[11px] text-white text-right">{scorecardData.bowler.runs}</span>
+                    <span className="text-[11px] font-bold text-red-400 text-right">{scorecardData.bowler.wickets}</span>
+                    <span className="text-[11px] text-yellow-400 text-right">{scorecardData.bowler.economy}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         )}
 
         {/* Total Pool */}

@@ -504,4 +504,132 @@ router.get("/scores", async (req: Request, res: Response) => {
   }
 });
 
+// ── Live scorecard: batting + bowling details ────────────────────────────────
+// GET /api/scorecard?matchId=3
+// Returns current batsmen (not out) and current bowler for live matches.
+router.get("/scorecard", async (req: Request, res: Response) => {
+  const matchId = req.query["matchId"] ? Number(req.query["matchId"]) : null;
+  if (!matchId) return res.status(400).json({ error: "matchId required" });
+
+  const [dbMatch] = await db.select().from(matchesTable).where(eq(matchesTable.id, matchId));
+  if (!dbMatch) return res.status(404).json({ error: "match not found" });
+
+  const cricId = dbMatch.cricapiMatchId;
+  if (!cricId) {
+    console.log(`[scorecard] no cricapi_match_id stored for match ${matchId}`);
+    return res.json({ found: false, reason: "no_match_id" });
+  }
+
+  const apiKey = process.env["CRICAPI_KEY"];
+  if (!apiKey) return res.json({ found: false, reason: "no_api_key" });
+
+  try {
+    const url = `https://api.cricapi.com/v1/match_score?apikey=${apiKey}&id=${cricId}`;
+    console.log(`[scorecard] → calling match_score for match ${matchId} (cricId=${cricId})`);
+    const upstream = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    if (!upstream.ok) {
+      console.log(`[scorecard] ← CricAPI HTTP error: ${upstream.status}`);
+      return res.json({ found: false, reason: "api_error" });
+    }
+
+    const data = await upstream.json() as {
+      status: string;
+      data?: {
+        id: string;
+        name: string;
+        status: string;
+        score?: Array<{ r: number; w: number; o: number; inning: string }>;
+        scorecard?: Array<{
+          inning: string;
+          batting: Array<{
+            batsman: string;
+            "dismissal-text"?: string;
+            r: number;
+            b: number;
+            "4s": number;
+            "6s": number;
+            sr: string | number;
+          }>;
+          bowling: Array<{
+            bowler: string;
+            o: string | number;
+            m: number;
+            r: number;
+            w: number;
+            eco: string | number;
+          }>;
+        }>;
+      };
+    };
+
+    if (data.status !== "success" || !data.data) {
+      console.log(`[scorecard] ← CricAPI failure: ${data.status}`);
+      return res.json({ found: false, reason: "api_failure" });
+    }
+
+    const match = data.data;
+    const innings = match.scorecard ?? [];
+
+    // Current innings = last one in the scorecard (most recent)
+    const currentInnings = innings[innings.length - 1];
+    if (!currentInnings) {
+      return res.json({ found: true, innings: [], status: match.status });
+    }
+
+    // Current batsmen = those not yet dismissed (empty dismissal text)
+    const currentBatsmen = (currentInnings.batting ?? [])
+      .filter(b => !b["dismissal-text"] || b["dismissal-text"].trim() === "")
+      .map(b => ({
+        name: b.batsman,
+        runs: b.r,
+        balls: b.b,
+        fours: b["4s"],
+        sixes: b["6s"],
+        sr: Number(b.sr).toFixed(1),
+      }));
+
+    // Current bowler = last bowler with partial (non-integer) overs, or last bowler overall
+    const bowlingList = currentInnings.bowling ?? [];
+    const currentBowler = (() => {
+      // Find the bowler with a fractional over (currently bowling)
+      const partial = bowlingList.slice().reverse().find(b => {
+        const o = String(b.o);
+        return o.includes(".") && !o.endsWith(".0");
+      });
+      const last = partial ?? bowlingList[bowlingList.length - 1];
+      if (!last) return null;
+      return {
+        name: last.bowler,
+        overs: String(last.o),
+        runs: last.r,
+        wickets: last.w,
+        economy: Number(last.eco).toFixed(1),
+      };
+    })();
+
+    // Build innings summary for all innings (for score display)
+    const inningsSummary = (match.score ?? []).map(s => ({
+      inning: s.inning,
+      runs: s.r,
+      wickets: s.w,
+      overs: s.o,
+    }));
+
+    console.log(`[scorecard] ← batsmen=${currentBatsmen.length} bowler=${currentBowler?.name ?? "none"}`);
+
+    return res.json({
+      found: true,
+      matchStatus: match.status,
+      currentInnings: currentInnings.inning,
+      batsmen: currentBatsmen,
+      bowler: currentBowler,
+      inningsSummary,
+    });
+  } catch (err) {
+    console.error("[scorecard] error:", err);
+    return res.json({ found: false, reason: "timeout" });
+  }
+});
+
 export default router;
+

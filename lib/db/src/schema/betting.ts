@@ -13,6 +13,7 @@ export const matchesTable = pgTable("matches", {
     .default("upcoming"),
   winner: varchar("winner"),
   score: text("score"),
+  cricapiMatchId: varchar("cricapi_match_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

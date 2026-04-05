@@ -322,6 +322,11 @@ export async function syncMatchesNow(): Promise<void> {
         });
 
         if (seriesMatch) {
+          // Always store the CricAPI match ID so the scorecard endpoint can use it
+          if (!dbMatch.cricapiMatchId) {
+            updates["cricapi_match_id"] = seriesMatch.id;
+          }
+
           const matchInfo = await fetchMatchInfo(apiKey, seriesMatch.id);
           const apiMatch = matchInfo ?? seriesMatch;
 
