@@ -59,6 +59,11 @@ interface CricApiMatch {
   matchEnded?: boolean;
 }
 
+// ── Sync cooldown ────────────────────────────────────────────────────────────
+// At most one CricAPI call per minute, regardless of how many users load the page
+let lastSyncAt = 0;
+const SYNC_COOLDOWN_MS = 60 * 1000; // 60 seconds
+
 // ── Series match list cache ──────────────────────────────────────────────────
 // Cached list of all IPL 2026 matches from series_info
 let seriesMatchCache: CricApiMatch[] = [];
@@ -225,31 +230,37 @@ export async function syncMatchesNow(): Promise<void> {
     return;
   }
 
+  const now = Date.now();
+
+  // ── Quick DB check before touching the API ───────────────────────────────
+  // Fetch all upcoming/live DB matches to see if any have actually started
+  const dbMatches = await db
+    .select()
+    .from(matchesTable)
+    .where(or(eq(matchesTable.status, "upcoming"), eq(matchesTable.status, "live")));
+
+  if (dbMatches.length === 0) {
+    return; // nothing to watch
+  }
+
+  // Only proceed if at least one match is past its scheduled start time (5-min grace)
+  const pastMatches = dbMatches.filter(
+    m => new Date(m.matchDate).getTime() < now - 5 * 60 * 1000,
+  );
+
+  if (pastMatches.length === 0) {
+    return; // all matches are still in the future — no CricAPI call needed
+  }
+
+  // ── Cooldown: at most one CricAPI call per minute ────────────────────────
+  if (now - lastSyncAt < SYNC_COOLDOWN_MS) {
+    logger.debug("CricAPI: skipping sync — cooldown active");
+    return;
+  }
+  lastSyncAt = now; // claim the slot before any await so concurrent requests skip
+
   try {
-    logger.info("CricAPI: syncing match statuses…");
-
-    // Fetch all upcoming/live DB matches
-    const dbMatches = await db
-      .select()
-      .from(matchesTable)
-      .where(or(eq(matchesTable.status, "upcoming"), eq(matchesTable.status, "live")));
-
-    if (dbMatches.length === 0) {
-      logger.info("CricAPI: no active matches to sync");
-      return;
-    }
-
-    const now = Date.now();
-
-    // Only process matches whose scheduled time has already passed (5-min grace)
-    const pastMatches = dbMatches.filter(
-      m => new Date(m.matchDate).getTime() < now - 5 * 60 * 1000,
-    );
-
-    if (pastMatches.length === 0) {
-      logger.info("CricAPI: no matches past schedule yet — nothing to sync");
-      return;
-    }
+    logger.info(`CricAPI: syncing ${pastMatches.length} past-scheduled match(es)…`);
 
     // ── Step 1: cricScore — real-time live/result status for ALL ongoing matches ──
     let cricScoreEntries: CricScoreEntry[] = [];
