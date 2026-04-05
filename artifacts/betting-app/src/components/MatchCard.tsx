@@ -115,7 +115,7 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
 
   // Live scores: always fresh on page load (staleTime: 0)
   // Finished scores: DB-first, call CricAPI once if not saved (staleTime: Infinity)
-  const { data: scoreData } = useQuery<{
+  const { data: scoreData, isFetching: scoreFetching } = useQuery<{
     found: boolean;
     status?: string;
     team1Score?: string;
@@ -132,6 +132,8 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
     enabled: isLive || (isFinished && !match.score),
     staleTime: isLive ? 0 : Infinity,
     refetchOnWindowFocus: isLive,
+    // Auto-refresh every 30s while match is live
+    refetchInterval: isLive ? 30_000 : false,
   });
 
   const liveScores = savedJsonScore
@@ -412,6 +414,21 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
           </div>
         ) : (
           <>
+            {/* Live match: show "in progress" banner while waiting for score */}
+            {isLive && (
+              <div className="rounded-xl border border-red-500/20 bg-red-500/8 overflow-hidden">
+                <div className="flex items-center justify-center gap-2 px-3 py-1.5 bg-red-500/10">
+                  <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
+                  <span className="text-[10px] font-black uppercase tracking-widest text-red-400">🔴 Live</span>
+                  {scoreFetching && (
+                    <span className="text-[10px] text-red-400/60 ml-1">fetching score…</span>
+                  )}
+                </div>
+                <p className="text-center text-xs text-muted-foreground py-2.5">
+                  {scoreFetching ? "Fetching live score…" : "Score not available yet — refreshing every 30s"}
+                </p>
+              </div>
+            )}
             {/* Fallback: stored score text */}
             {match.score && (
               <div className={`rounded-xl px-4 py-2.5 text-center border ${

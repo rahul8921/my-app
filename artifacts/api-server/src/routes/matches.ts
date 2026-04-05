@@ -427,8 +427,6 @@ router.get("/scores", async (req: Request, res: Response) => {
     }> };
 
     const matches = data.data ?? [];
-    const input1 = team1.toLowerCase();
-    const input2 = team2.toLowerCase();
 
     let team1Score = "";
     let team2Score = "";
@@ -436,18 +434,30 @@ router.get("/scores", async (req: Request, res: Response) => {
     let apiMatchStatus = "";
 
     for (const m of matches) {
-      // Strip brackets: "Chennai Super Kings [CSK]" → name="Chennai Super Kings", abbr="CSK"
-      const t1Name = m.t1.replace(/\[.*?\]/g, "").trim();
-      const t2Name = m.t2.replace(/\[.*?\]/g, "").trim();
-      const t1Abbr = (m.t1.match(/\[(.*?)\]/) ?? [])[1] ?? "";
-      const t2Abbr = (m.t2.match(/\[(.*?)\]/) ?? [])[1] ?? "";
+      // Resolve each CricAPI team name to an IPL abbreviation using all available signals:
+      // 1) explicit bracket abbrev "Chennai Super Kings [CSK]" → "CSK"
+      // 2) fuzzy keyword lookup via resolveAbbrev ("chennai" → "CSK")
+      // 3) fall back to the raw name for a final direct comparison
+      const t1Raw = m.t1.trim();
+      const t2Raw = m.t2.trim();
+      const t1Abbr = ((m.t1.match(/\[(.*?)\]/) ?? [])[1] ?? "").toUpperCase();
+      const t2Abbr = ((m.t2.match(/\[(.*?)\]/) ?? [])[1] ?? "").toUpperCase();
+      const t1Name = t1Raw.replace(/\[.*?\]/g, "").trim();
+      const t2Name = t2Raw.replace(/\[.*?\]/g, "").trim();
 
-      const isDirectMatch =
-        (input1 === t1Name.toLowerCase() || input1 === t1Abbr.toLowerCase()) &&
-        (input2 === t2Name.toLowerCase() || input2 === t2Abbr.toLowerCase());
-      const isReverseMatch =
-        (input1 === t2Name.toLowerCase() || input1 === t2Abbr.toLowerCase()) &&
-        (input2 === t1Name.toLowerCase() || input2 === t1Abbr.toLowerCase());
+      // Resolved abbreviation: bracket > keyword > raw abbrev > null
+      const resolveTeam = (name: string, bracketAbbr: string): string => {
+        if (bracketAbbr) return bracketAbbr;
+        const kw = resolveAbbrev(name);
+        if (kw) return kw;
+        return name.toUpperCase();
+      };
+
+      const apiTeam1 = resolveTeam(t1Name, t1Abbr);
+      const apiTeam2 = resolveTeam(t2Name, t2Abbr);
+
+      const isDirectMatch = apiTeam1 === team1 && apiTeam2 === team2;
+      const isReverseMatch = apiTeam1 === team2 && apiTeam2 === team1;
 
       if (!isDirectMatch && !isReverseMatch) continue;
 
