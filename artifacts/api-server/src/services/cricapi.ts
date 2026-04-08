@@ -240,18 +240,26 @@ function findCricScoreEntry(
   });
 }
 
-/** Determine which DB team won from a result status string */
+/** Determine which DB team won from a result status string like "Rajasthan Royals won by 27 runs" */
 function resolveWinner(statusText: string, dbTeam1: string, dbTeam2: string): string | null {
   const lower = statusText.toLowerCase();
   if (!lower.includes("won")) return null;
-  // Check full name match
-  if (lower.includes(dbTeam1.toLowerCase())) return dbTeam1;
-  if (lower.includes(dbTeam2.toLowerCase())) return dbTeam2;
-  // Check abbreviation match
-  const k1 = resolveKey(dbTeam1);
-  const k2 = resolveKey(dbTeam2);
-  if (k1 && lower.includes(k1.toLowerCase())) return dbTeam1;
-  if (k2 && lower.includes(k2.toLowerCase())) return dbTeam2;
+
+  function teamMatchesResult(dbTeam: string): boolean {
+    // 1. Direct name match (e.g. dbTeam = "CSK", result contains "csk")
+    if (lower.includes(dbTeam.toLowerCase())) return true;
+    // 2. Resolve to canonical key (e.g. "RR" → "RR") then check all its keywords
+    const key = resolveKey(dbTeam);
+    if (key) {
+      const keywords = IPL_KEYWORDS[key] ?? [];
+      // Check each keyword (trim spaces used for word-boundary matching)
+      if (keywords.some(kw => lower.includes(kw.trim()))) return true;
+    }
+    return false;
+  }
+
+  if (teamMatchesResult(dbTeam1)) return dbTeam1;
+  if (teamMatchesResult(dbTeam2)) return dbTeam2;
   return null;
 }
 
