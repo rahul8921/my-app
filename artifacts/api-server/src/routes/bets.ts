@@ -102,8 +102,9 @@ router.post("/bets", async (req: Request, res: Response) => {
     return;
   }
 
-  if (new Date() >= match.matchDate || match.status !== "upcoming") {
-    res.status(400).json({ error: "Betting is locked — the match time has passed" });
+  const lockTime = new Date(match.matchDate.getTime() - 30 * 60 * 1000);
+  if (new Date() >= lockTime || match.status !== "upcoming") {
+    res.status(400).json({ error: "Betting is locked — closes 30 minutes before match start" });
     return;
   }
 
@@ -197,8 +198,9 @@ router.patch("/bets/:betId", async (req: Request, res: Response) => {
     .from(matchesTable)
     .where(eq(matchesTable.id, bet.matchId));
 
-  if (!match || new Date() >= match.matchDate || match.status !== "upcoming") {
-    res.status(400).json({ error: "Betting is locked — the match time has passed" });
+  const lockTimeEdit = new Date(match.matchDate.getTime() - 30 * 60 * 1000);
+  if (!match || new Date() >= lockTimeEdit || match.status !== "upcoming") {
+    res.status(400).json({ error: "Betting is locked — closes 30 minutes before match start" });
     return;
   }
 
@@ -268,8 +270,9 @@ router.delete("/bets/:betId", async (req: Request, res: Response) => {
     .from(matchesTable)
     .where(eq(matchesTable.id, bet.matchId));
 
-  if (!match || new Date() >= match.matchDate || match.status !== "upcoming") {
-    res.status(400).json({ error: "Betting is locked — the match time has passed" });
+  const lockTimeCancel = new Date(match.matchDate.getTime() - 30 * 60 * 1000);
+  if (!match || new Date() >= lockTimeCancel || match.status !== "upcoming") {
+    res.status(400).json({ error: "Betting is locked — closes 30 minutes before match start" });
     return;
   }
 

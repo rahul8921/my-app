@@ -156,7 +156,8 @@ export default function MyBets() {
             const isPending = bet.status === 'pending';
             const isLive = match.status === 'live';
             const isFinished = match.status === 'finished';
-            const matchTimeUp = new Date() >= new Date(match.matchDate);
+            const bettingLockTime = new Date(new Date(match.matchDate).getTime() - 30 * 60 * 1000);
+            const matchTimeUp = new Date() >= bettingLockTime;
             const isEditable = !matchTimeUp && match.status === 'upcoming';
             const isLocked = !isEditable;
 

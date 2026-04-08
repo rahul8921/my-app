@@ -159,7 +159,8 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
   const team1Pct = totalPool === 0 ? 50 : Math.round((match.totalBetsTeam1 / totalPool) * 100);
   const team2Pct = totalPool === 0 ? 50 : Math.round((match.totalBetsTeam2 / totalPool) * 100);
 
-  const matchTimeUp = new Date() >= new Date(match.matchDate);
+  const bettingLockTime = new Date(new Date(match.matchDate).getTime() - 30 * 60 * 1000);
+  const matchTimeUp = new Date() >= bettingLockTime;
   const canBet = match.status === 'upcoming' && !matchTimeUp && isApproved && !userBet;
   const canEdit = !!userBet && match.status === 'upcoming' && !matchTimeUp && isApproved;
 
@@ -675,7 +676,11 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
 
         {/* Locked message — has bet but match is locked/live/finished and bet is pending */}
         {userBet && !canEdit && userBet.status === 'pending' && !isFinished && (
-          <p className="text-xs text-center text-muted-foreground">Betting locked — match is {match.status}</p>
+          <p className="text-xs text-center text-muted-foreground">
+            {match.status === 'upcoming'
+              ? 'Betting locked — closes 30 min before match start'
+              : `Betting locked — match is ${match.status}`}
+          </p>
         )}
       </div>
 
