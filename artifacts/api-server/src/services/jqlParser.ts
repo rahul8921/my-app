@@ -1,5 +1,5 @@
-import { eq, ne, ilike, inArray, not, gt, lt, gte, lte, isNull, isNotNull, sql, SQL } from "drizzle-orm";
-import { db, jiraIssuesTable, usersTable } from "@workspace/db";
+import { eq, ne, ilike, inArray, not, gt, lt, gte, lte, isNull, isNotNull, sql, and, SQL } from "drizzle-orm";
+import { db, jiraIssuesTable, usersTable, jiraCustomFieldDefsTable, jiraCustomFieldValuesTable } from "@workspace/db";
 
 type StatusVal = "todo" | "in_progress" | "review" | "done";
 type TypeVal = "bug" | "task" | "story" | "epic";
@@ -76,6 +76,58 @@ function extractOrderBy(jql: string): { query: string; order?: ParsedOrder } {
   return { query: jql.slice(0, jql.length - m[0].length).trim(), order: { field, dir } };
 }
 
+async function getCustomField(field: string, projectId: string) {
+  const [cf] = await db.select()
+    .from(jiraCustomFieldDefsTable)
+    .where(and(
+      eq(jiraCustomFieldDefsTable.projectId, projectId),
+      sql`lower(${jiraCustomFieldDefsTable.name}) = ${field.toLowerCase()}`,
+    ));
+  return cf ?? null;
+}
+
+async function buildCustomFieldCondition(
+  cf: typeof jiraCustomFieldDefsTable.$inferSelect,
+  op: string,
+  value: string,
+): Promise<SQL> {
+  let valueCondition: SQL;
+  if (op === "=" || op === "~") {
+    valueCondition = op === "~"
+      ? ilike(jiraCustomFieldValuesTable.value, `%${value}%`)
+      : eq(jiraCustomFieldValuesTable.value, value);
+  } else if (op === "!=" || op === "!~") {
+    valueCondition = op === "!~"
+      ? not(ilike(jiraCustomFieldValuesTable.value, `%${value}%`))
+      : ne(jiraCustomFieldValuesTable.value, value);
+  } else if ([">", ">=", "<", "<="].includes(op)) {
+    if (cf.fieldType === "number") {
+      const num = parseFloat(value);
+      if (isNaN(num)) throw new JQLError(`"${value}" is not a valid number for field "${cf.name}"`);
+      if (op === ">") valueCondition = sql`cast(${jiraCustomFieldValuesTable.value} as numeric) > ${num}`;
+      else if (op === ">=") valueCondition = sql`cast(${jiraCustomFieldValuesTable.value} as numeric) >= ${num}`;
+      else if (op === "<") valueCondition = sql`cast(${jiraCustomFieldValuesTable.value} as numeric) < ${num}`;
+      else valueCondition = sql`cast(${jiraCustomFieldValuesTable.value} as numeric) <= ${num}`;
+    } else if (cf.fieldType === "date") {
+      const d = new Date(value);
+      if (isNaN(d.getTime())) throw new JQLError(`"${value}" is not a valid date for field "${cf.name}"`);
+      if (op === ">") valueCondition = sql`cast(${jiraCustomFieldValuesTable.value} as date) > ${value}::date`;
+      else if (op === ">=") valueCondition = sql`cast(${jiraCustomFieldValuesTable.value} as date) >= ${value}::date`;
+      else if (op === "<") valueCondition = sql`cast(${jiraCustomFieldValuesTable.value} as date) < ${value}::date`;
+      else valueCondition = sql`cast(${jiraCustomFieldValuesTable.value} as date) <= ${value}::date`;
+    } else {
+      throw new JQLError(`Operator "${op}" requires a number or date field. "${cf.name}" is type "${cf.fieldType}"`);
+    }
+  } else {
+    throw new JQLError(`Operator "${op}" is not supported for custom field "${cf.name}"`);
+  }
+
+  const sub = db.select({ id: jiraCustomFieldValuesTable.issueId })
+    .from(jiraCustomFieldValuesTable)
+    .where(and(eq(jiraCustomFieldValuesTable.fieldId, cf.id), valueCondition));
+  return inArray(jiraIssuesTable.id, sub);
+}
+
 export async function parseJQL(
   jql: string,
   projectId: string,
@@ -94,31 +146,43 @@ export async function parseJQL(
     if (/^\w+\s+is\s+not\s+empty$/i.test(c)) {
       const field = c.match(/^(\w+)/i)![1].toLowerCase();
       if (field === "assignee") { conditions.push(isNotNull(jiraIssuesTable.assigneeId)); continue; }
-      throw new JQLError(`"is not EMPTY" not supported for "${field}"`);
+      throw new JQLError(`"is not EMPTY" is only supported for the "assignee" field`);
     }
     if (/^\w+\s+is\s+empty$/i.test(c)) {
       const field = c.match(/^(\w+)/i)![1].toLowerCase();
       if (field === "assignee") { conditions.push(isNull(jiraIssuesTable.assigneeId)); continue; }
-      throw new JQLError(`"is EMPTY" not supported for "${field}"`);
+      throw new JQLError(`"is EMPTY" is only supported for the "assignee" field`);
     }
 
     // --- NOT IN ---
     const notInM = c.match(/^(\w+)\s+not\s+in\s*(\([\s\S]*\))$/i);
     if (notInM) {
-      await applyListCondition(notInM[1].toLowerCase(), parseList(notInM[2]), true, conditions);
+      await applyListCondition(notInM[1].toLowerCase(), parseList(notInM[2]), true, conditions, projectId);
       continue;
     }
 
     // --- IN ---
     const inM = c.match(/^(\w+)\s+in\s*(\([\s\S]*\))$/i);
     if (inM) {
-      await applyListCondition(inM[1].toLowerCase(), parseList(inM[2]), false, conditions);
+      await applyListCondition(inM[1].toLowerCase(), parseList(inM[2]), false, conditions, projectId);
       continue;
     }
 
-    // --- operator conditions (=, !=, ~, !~, >=, <=, >, <) ---
+    // --- Quoted field name (custom fields with spaces) ---
+    const quotedFieldM = c.match(/^["']([^"']+)["']\s*(>=|<=|!=|!~|=|~|>|<)\s*([\s\S]+)$/);
+    if (quotedFieldM) {
+      const fieldName = quotedFieldM[1];
+      const op = quotedFieldM[2];
+      const value = stripQuotes(quotedFieldM[3].trim());
+      const cf = await getCustomField(fieldName, projectId);
+      if (!cf) throw new JQLError(`Unknown field: "${fieldName}"`);
+      conditions.push(await buildCustomFieldCondition(cf, op, value));
+      continue;
+    }
+
+    // --- Standard: field op value ---
     const opM = c.match(/^(\w+)\s*(>=|<=|!=|!~|=|~|>|<)\s*([\s\S]+)$/);
-    if (!opM) throw new JQLError(`Cannot parse: "${c}"\nSyntax: field operator value`);
+    if (!opM) throw new JQLError(`Cannot parse: "${c}"\nExpected format: field operator value`);
 
     const [, rawField, op, rawVal] = opM;
     const field = rawField.toLowerCase();
@@ -128,20 +192,20 @@ export async function parseJQL(
     switch (field) {
       case "status": {
         const mapped = STATUS_MAP[vLow];
-        if (!mapped) throw new JQLError(`Unknown status: "${value}"\nValid values: todo, "in progress", review, done`);
+        if (!mapped) throw new JQLError(`Unknown status: "${value}"\nValid: todo, "in progress", review, done`);
         conditions.push(op === "!=" ? ne(jiraIssuesTable.status, mapped) : eq(jiraIssuesTable.status, mapped));
         break;
       }
       case "type":
       case "issuetype": {
         const mapped = TYPE_MAP[vLow];
-        if (!mapped) throw new JQLError(`Unknown type: "${value}"\nValid values: bug, task, story, epic`);
+        if (!mapped) throw new JQLError(`Unknown type: "${value}"\nValid: bug, task, story, epic`);
         conditions.push(op === "!=" ? ne(jiraIssuesTable.type, mapped) : eq(jiraIssuesTable.type, mapped));
         break;
       }
       case "priority": {
         const mapped = PRIORITY_MAP[vLow];
-        if (!mapped) throw new JQLError(`Unknown priority: "${value}"\nValid values: low, medium, high, critical`);
+        if (!mapped) throw new JQLError(`Unknown priority: "${value}"\nValid: low, medium, high, critical`);
         conditions.push(op === "!=" ? ne(jiraIssuesTable.priority, mapped) : eq(jiraIssuesTable.priority, mapped));
         break;
       }
@@ -150,8 +214,7 @@ export async function parseJQL(
           conditions.push(op === "!=" ? isNotNull(jiraIssuesTable.assigneeId) : isNull(jiraIssuesTable.assigneeId));
         } else {
           const [user] = await db.select({ id: usersTable.id })
-            .from(usersTable)
-            .where(sql`lower(${usersTable.username}) = ${vLow}`);
+            .from(usersTable).where(sql`lower(${usersTable.username}) = ${vLow}`);
           if (!user) throw new JQLError(`No user found with username "${value}"`);
           conditions.push(op === "!=" ? ne(jiraIssuesTable.assigneeId, user.id) : eq(jiraIssuesTable.assigneeId, user.id));
         }
@@ -164,31 +227,37 @@ export async function parseJQL(
         else if (op === "!~") conditions.push(not(ilike(jiraIssuesTable.title, `%${value}%`)));
         else if (op === "=") conditions.push(eq(jiraIssuesTable.title, value));
         else if (op === "!=") conditions.push(ne(jiraIssuesTable.title, value));
-        else throw new JQLError(`Operator "${op}" not supported for "${field}". Use ~ for contains`);
+        else throw new JQLError(`Use ~ for text contains, e.g.: summary ~ "login"`);
         break;
       }
       case "created": {
         const d = new Date(value);
-        if (isNaN(d.getTime())) throw new JQLError(`Invalid date: "${value}"\nFormat: YYYY-MM-DD`);
+        if (isNaN(d.getTime())) throw new JQLError(`Invalid date: "${value}" — use YYYY-MM-DD`);
         if (op === ">") conditions.push(gt(jiraIssuesTable.createdAt, d));
         else if (op === "<") conditions.push(lt(jiraIssuesTable.createdAt, d));
         else if (op === ">=") conditions.push(gte(jiraIssuesTable.createdAt, d));
         else if (op === "<=") conditions.push(lte(jiraIssuesTable.createdAt, d));
-        else throw new JQLError(`Operator "${op}" not supported for "created". Use >, <, >=, <=`);
+        else throw new JQLError(`Use >, <, >=, <= for "created"`);
         break;
       }
       case "updated": {
         const d = new Date(value);
-        if (isNaN(d.getTime())) throw new JQLError(`Invalid date: "${value}"\nFormat: YYYY-MM-DD`);
+        if (isNaN(d.getTime())) throw new JQLError(`Invalid date: "${value}" — use YYYY-MM-DD`);
         if (op === ">") conditions.push(gt(jiraIssuesTable.updatedAt, d));
         else if (op === "<") conditions.push(lt(jiraIssuesTable.updatedAt, d));
         else if (op === ">=") conditions.push(gte(jiraIssuesTable.updatedAt, d));
         else if (op === "<=") conditions.push(lte(jiraIssuesTable.updatedAt, d));
-        else throw new JQLError(`Operator "${op}" not supported for "updated". Use >, <, >=, <=`);
+        else throw new JQLError(`Use >, <, >=, <= for "updated"`);
         break;
       }
-      default:
-        throw new JQLError(`Unknown field: "${field}"\nSupported fields: status, type, priority, assignee, summary, created, updated`);
+      default: {
+        const cf = await getCustomField(field, projectId);
+        if (!cf) {
+          throw new JQLError(`Unknown field: "${field}"\nBuilt-in fields: status, type, priority, assignee, summary, created, updated\nCustom fields can be used by name (e.g. Sprint = "Sprint 1")`);
+        }
+        conditions.push(await buildCustomFieldCondition(cf, op, value));
+        break;
+      }
     }
   }
 
@@ -200,8 +269,9 @@ async function applyListCondition(
   values: string[],
   negate: boolean,
   conditions: SQL[],
+  projectId: string,
 ): Promise<void> {
-  if (!values.length) throw new JQLError(`Empty list in IN clause`);
+  if (!values.length) throw new JQLError(`Empty list in IN clause for "${field}"`);
 
   switch (field) {
     case "status": {
@@ -224,13 +294,12 @@ async function applyListCondition(
       break;
     }
     case "assignee": {
+      const conds: SQL[] = [];
       const empties = values.filter(v => ["empty", "null", "unassigned"].includes(v.toLowerCase()));
       const names = values.filter(v => !["empty", "null", "unassigned"].includes(v.toLowerCase()));
-      const conds: SQL[] = [];
       if (empties.length) conds.push(isNull(jiraIssuesTable.assigneeId));
       if (names.length) {
-        const users = await db.select({ id: usersTable.id })
-          .from(usersTable)
+        const users = await db.select({ id: usersTable.id }).from(usersTable)
           .where(sql`lower(${usersTable.username}) = ANY(ARRAY[${sql.join(names.map(n => sql`${n.toLowerCase()}`), sql`, `)}]::text[])`);
         if (users.length) conds.push(inArray(jiraIssuesTable.assigneeId, users.map(u => u.id)));
       }
@@ -239,7 +308,17 @@ async function applyListCondition(
       conditions.push(negate ? not(combined) : combined);
       break;
     }
-    default:
-      throw new JQLError(`Field "${field}" does not support IN operator`);
+    default: {
+      const cf = await getCustomField(field, projectId);
+      if (!cf) throw new JQLError(`Field "${field}" does not support IN operator, or is not a known field`);
+      const subQuery = db.select({ id: jiraCustomFieldValuesTable.issueId })
+        .from(jiraCustomFieldValuesTable)
+        .where(and(
+          eq(jiraCustomFieldValuesTable.fieldId, cf.id),
+          inArray(jiraCustomFieldValuesTable.value, values),
+        ));
+      conditions.push(negate ? not(inArray(jiraIssuesTable.id, subQuery)) : inArray(jiraIssuesTable.id, subQuery));
+      break;
+    }
   }
 }
