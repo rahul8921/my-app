@@ -1,6 +1,7 @@
 export type IssueType = "bug" | "task" | "story" | "epic";
 export type Priority = "low" | "medium" | "high" | "critical";
 export type Status = "todo" | "in_progress" | "review" | "done";
+export type FieldType = "text" | "number" | "select" | "date";
 
 export interface User {
   id: string;
@@ -9,20 +10,38 @@ export interface User {
 }
 
 export interface Project {
-  id: number;
+  id: string;
   key: string;
   name: string;
   description: string | null;
   createdAt: string;
+  issueCount?: number;
   _count?: {
     issues: number;
   };
 }
 
+export interface CustomFieldDef {
+  id: string;
+  projectId: string;
+  name: string;
+  fieldType: FieldType;
+  options: string[];
+  position: number;
+  createdAt: string;
+}
+
+export interface CustomFieldValue {
+  id: string;
+  issueId: string;
+  fieldId: string;
+  value: string | null;
+}
+
 export interface Issue {
-  id: number;
+  id: string;
   key: string;
-  projectId: number;
+  projectId: string;
   title: string;
   description: string | null;
   type: IssueType;
@@ -34,11 +53,12 @@ export interface Issue {
   updatedAt: string;
   assignee?: User | null;
   reporter?: User | null;
+  customFieldValues?: CustomFieldValue[];
 }
 
 export interface Comment {
-  id: number;
-  issueId: number;
+  id: string;
+  issueId: string;
   userId: string;
   content: string;
   createdAt: string;
@@ -52,4 +72,12 @@ export interface AuthUser {
   lastName?: string;
   profileImage?: string;
   isAdmin: boolean;
+}
+
+export interface IssueFilters {
+  search?: string;
+  status?: string;
+  type?: string;
+  priority?: string;
+  assigneeId?: string;
 }

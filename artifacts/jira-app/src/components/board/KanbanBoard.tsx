@@ -30,7 +30,7 @@ export function KanbanBoard({ issues: initialIssues }: { issues: Issue[] }) {
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
   const updateStatusMutation = useUpdateIssueStatus();
   
-  const [selectedIssueId, setSelectedIssueId] = useState<number | null>(null);
+  const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),

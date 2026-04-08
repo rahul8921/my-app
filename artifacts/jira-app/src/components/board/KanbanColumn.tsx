@@ -7,7 +7,7 @@ interface KanbanColumnProps {
   id: Status;
   title: string;
   issues: Issue[];
-  onIssueClick: (id: number) => void;
+  onIssueClick: (id: string) => void;
 }
 
 export function KanbanColumn({ id, title, issues, onIssueClick }: KanbanColumnProps) {

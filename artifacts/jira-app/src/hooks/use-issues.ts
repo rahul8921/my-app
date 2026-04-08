@@ -1,12 +1,17 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
-import type { Issue, Comment, IssueType, Priority, Status } from "@/lib/types";
+import type { Issue, Comment, Status, IssueFilters } from "@/lib/types";
 
-export function useIssues(projectKey: string, filters?: Record<string, string>) {
+export function useIssues(projectKey: string, filters?: IssueFilters) {
   return useQuery<Issue[]>({
     queryKey: ["issues", projectKey, filters],
     queryFn: () => {
-      const params = new URLSearchParams(filters || {});
+      const params = new URLSearchParams();
+      if (filters?.search) params.set("search", filters.search);
+      if (filters?.status) params.set("status", filters.status);
+      if (filters?.type) params.set("type", filters.type);
+      if (filters?.priority) params.set("priority", filters.priority);
+      if (filters?.assigneeId) params.set("assigneeId", filters.assigneeId);
       const qs = params.toString();
       return apiFetch(`/projects/${projectKey}/issues${qs ? `?${qs}` : ""}`);
     },
@@ -14,7 +19,7 @@ export function useIssues(projectKey: string, filters?: Record<string, string>) 
   });
 }
 
-export function useIssue(id: number) {
+export function useIssue(id: string | null) {
   return useQuery<Issue>({
     queryKey: ["issues", "detail", id],
     queryFn: () => apiFetch(`/issues/${id}`),
@@ -25,7 +30,7 @@ export function useIssue(id: number) {
 export function useCreateIssue() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ projectKey, data }: { projectKey: string, data: Partial<Issue> }) => 
+    mutationFn: ({ projectKey, data }: { projectKey: string, data: Partial<Issue> }) =>
       apiFetch<Issue>(`/projects/${projectKey}/issues`, { method: "POST", body: JSON.stringify(data) }),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ["issues", variables.projectKey] });
@@ -36,7 +41,7 @@ export function useCreateIssue() {
 export function useUpdateIssue() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, data }: { id: number, data: Partial<Issue> }) => 
+    mutationFn: ({ id, data }: { id: string, data: Partial<Issue> }) =>
       apiFetch<Issue>(`/issues/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["issues"] });
@@ -48,7 +53,7 @@ export function useUpdateIssue() {
 export function useUpdateIssueStatus() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, status }: { id: number, status: Status }) => 
+    mutationFn: ({ id, status }: { id: string, status: Status }) =>
       apiFetch<Issue>(`/issues/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["issues"] });
@@ -60,7 +65,7 @@ export function useUpdateIssueStatus() {
 export function useDeleteIssue() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: number) => 
+    mutationFn: (id: string) =>
       apiFetch(`/issues/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["issues"] });
@@ -68,7 +73,7 @@ export function useDeleteIssue() {
   });
 }
 
-export function useComments(issueId: number) {
+export function useComments(issueId: string | null) {
   return useQuery<Comment[]>({
     queryKey: ["comments", issueId],
     queryFn: () => apiFetch(`/issues/${issueId}/comments`),
@@ -79,7 +84,7 @@ export function useComments(issueId: number) {
 export function useAddComment() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ issueId, content }: { issueId: number, content: string }) => 
+    mutationFn: ({ issueId, content }: { issueId: string, content: string }) =>
       apiFetch<Comment>(`/issues/${issueId}/comments`, { method: "POST", body: JSON.stringify({ content }) }),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ["comments", variables.issueId] });

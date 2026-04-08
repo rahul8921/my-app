@@ -1,13 +1,12 @@
 import { Link, useLocation } from "wouter";
 import { useProjects } from "@/hooks/use-projects";
 import { useAuth } from "@/hooks/use-auth";
-import { 
-  Briefcase, 
-  LayoutDashboard, 
-  List, 
-  Settings, 
+import {
+  Briefcase,
+  LayoutDashboard,
+  List,
+  Settings,
   Layers,
-  Plus,
   LogOut,
   ChevronDown
 } from "lucide-react";
@@ -15,13 +14,12 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { useState } from "react";
 
 export function Sidebar() {
   const [location] = useLocation();
   const { data: projects, isLoading: projectsLoading } = useProjects();
   const { user, logout } = useAuth();
-  
+
   const currentProjectKey = location.match(/\/projects\/([^\/]+)/)?.[1];
 
   return (
@@ -50,7 +48,7 @@ export function Sidebar() {
             </div>
             <div className="space-y-1">
               <Link href={`/projects/${currentProjectKey}`}>
-                <Button variant="ghost" className={`w-full justify-start text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground ${location.endsWith(currentProjectKey) ? 'bg-sidebar-accent text-sidebar-accent-foreground' : ''}`}>
+                <Button variant="ghost" className={`w-full justify-start text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground ${location === `/projects/${currentProjectKey}` ? 'bg-sidebar-accent text-sidebar-accent-foreground' : ''}`}>
                   <LayoutDashboard className="w-4 h-4 mr-2" />
                   Kanban Board
                 </Button>
@@ -61,6 +59,12 @@ export function Sidebar() {
                   List View
                 </Button>
               </Link>
+              <Link href={`/projects/${currentProjectKey}/settings`}>
+                <Button variant="ghost" className={`w-full justify-start text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground ${location.includes('/settings') ? 'bg-sidebar-accent text-sidebar-accent-foreground' : ''}`}>
+                  <Settings className="w-4 h-4 mr-2" />
+                  Project Settings
+                </Button>
+              </Link>
             </div>
           </div>
         )}
@@ -69,7 +73,7 @@ export function Sidebar() {
           <div className="text-xs font-semibold text-sidebar-foreground/50 uppercase tracking-wider mb-2 px-2 flex justify-between items-center">
             <span>Recent Projects</span>
           </div>
-          
+
           <div className="space-y-1">
             {projectsLoading ? (
               Array.from({ length: 3 }).map((_, i) => (

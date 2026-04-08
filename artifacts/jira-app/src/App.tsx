@@ -7,6 +7,7 @@ import NotFound from "@/pages/not-found";
 import Projects from "./pages/Projects";
 import Board from "./pages/Board";
 import ListView from "./pages/ListView";
+import ProjectSettings from "./pages/ProjectSettings";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -23,6 +24,7 @@ function Router() {
       <Route path="/" component={Projects} />
       <Route path="/projects/:key" component={Board} />
       <Route path="/projects/:key/list" component={ListView} />
+      <Route path="/projects/:key/settings" component={ProjectSettings} />
       <Route component={NotFound} />
     </Switch>
   );

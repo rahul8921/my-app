@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, pgTable, text, timestamp, varchar } from "drizzle-orm/pg-core";
+import { index, integer, pgTable, text, timestamp, varchar, uniqueIndex } from "drizzle-orm/pg-core";
 import { usersTable } from "./auth";
 
 export const jiraProjectsTable = pgTable("jira_projects", {
@@ -58,9 +58,46 @@ export const jiraCommentsTable = pgTable(
   (table) => [index("jira_comments_issue_idx").on(table.issueId)],
 );
 
+export const jiraCustomFieldDefsTable = pgTable(
+  "jira_custom_field_defs",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    projectId: varchar("project_id")
+      .notNull()
+      .references(() => jiraProjectsTable.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 100 }).notNull(),
+    fieldType: varchar("field_type", { enum: ["text", "number", "select", "date"] }).notNull().default("text"),
+    options: text("options"),
+    position: integer("position").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("jira_custom_fields_project_idx").on(table.projectId)],
+);
+
+export const jiraCustomFieldValuesTable = pgTable(
+  "jira_custom_field_values",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    issueId: varchar("issue_id")
+      .notNull()
+      .references(() => jiraIssuesTable.id, { onDelete: "cascade" }),
+    fieldId: varchar("field_id")
+      .notNull()
+      .references(() => jiraCustomFieldDefsTable.id, { onDelete: "cascade" }),
+    value: text("value"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
+  },
+  (table) => [
+    uniqueIndex("jira_cfv_unique_idx").on(table.issueId, table.fieldId),
+    index("jira_cfv_issue_idx").on(table.issueId),
+  ],
+);
+
 export type JiraProject = typeof jiraProjectsTable.$inferSelect;
 export type InsertJiraProject = typeof jiraProjectsTable.$inferInsert;
 export type JiraIssue = typeof jiraIssuesTable.$inferSelect;
 export type InsertJiraIssue = typeof jiraIssuesTable.$inferInsert;
 export type JiraComment = typeof jiraCommentsTable.$inferSelect;
 export type InsertJiraComment = typeof jiraCommentsTable.$inferInsert;
+export type JiraCustomFieldDef = typeof jiraCustomFieldDefsTable.$inferSelect;
+export type JiraCustomFieldValue = typeof jiraCustomFieldValuesTable.$inferSelect;

@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
-import { db, jiraProjectsTable, jiraIssuesTable, jiraCommentsTable, usersTable } from "@workspace/db";
-import { eq, and, desc, asc, sql } from "drizzle-orm";
+import { db, jiraProjectsTable, jiraIssuesTable, jiraCommentsTable, usersTable, jiraCustomFieldDefsTable, jiraCustomFieldValuesTable } from "@workspace/db";
+import { eq, and, desc, asc, sql, ilike, inArray } from "drizzle-orm";
 
 const router = Router();
 
@@ -89,6 +89,87 @@ router.delete("/projects/:key", async (req: Request, res: Response) => {
   res.json({ success: true });
 });
 
+// ─── Custom Fields ────────────────────────────────────────────────────────────
+
+function parseFieldDef(f: typeof jiraCustomFieldDefsTable.$inferSelect) {
+  return { ...f, options: f.options ? (JSON.parse(f.options) as string[]) : [] };
+}
+
+router.get("/projects/:key/fields", async (req: Request, res: Response) => {
+  const userId = requireAuth(req, res);
+  if (!userId) return;
+
+  const [project] = await db.select().from(jiraProjectsTable).where(eq(jiraProjectsTable.key, req.params.key));
+  if (!project) return res.status(404).json({ error: "Project not found" });
+
+  const fields = await db.select().from(jiraCustomFieldDefsTable)
+    .where(eq(jiraCustomFieldDefsTable.projectId, project.id))
+    .orderBy(asc(jiraCustomFieldDefsTable.position));
+  res.json(fields.map(parseFieldDef));
+});
+
+router.post("/projects/:key/fields", async (req: Request, res: Response) => {
+  const userId = requireAuth(req, res);
+  if (!userId) return;
+
+  const [project] = await db.select().from(jiraProjectsTable).where(eq(jiraProjectsTable.key, req.params.key));
+  if (!project) return res.status(404).json({ error: "Project not found" });
+
+  const { name, fieldType, options } = req.body as { name?: string; fieldType?: string; options?: string[] };
+  if (!name || !fieldType) return res.status(400).json({ error: "name and fieldType are required" });
+  if (!["text", "number", "select", "date"].includes(fieldType)) return res.status(400).json({ error: "invalid fieldType" });
+
+  const [maxPos] = await db
+    .select({ max: sql<number>`coalesce(max(position), 0)::int` })
+    .from(jiraCustomFieldDefsTable)
+    .where(eq(jiraCustomFieldDefsTable.projectId, project.id));
+
+  const [field] = await db.insert(jiraCustomFieldDefsTable).values({
+    projectId: project.id,
+    name,
+    fieldType: fieldType as any,
+    options: (fieldType === "select" && options?.length) ? JSON.stringify(options) : null,
+    position: (maxPos?.max ?? 0) + 1,
+  }).returning();
+
+  res.status(201).json(parseFieldDef(field));
+});
+
+router.patch("/projects/:key/fields/:fieldId", async (req: Request, res: Response) => {
+  const userId = requireAuth(req, res);
+  if (!userId) return;
+
+  const [project] = await db.select().from(jiraProjectsTable).where(eq(jiraProjectsTable.key, req.params.key));
+  if (!project) return res.status(404).json({ error: "Project not found" });
+
+  const [field] = await db.select().from(jiraCustomFieldDefsTable)
+    .where(and(eq(jiraCustomFieldDefsTable.id, req.params.fieldId), eq(jiraCustomFieldDefsTable.projectId, project.id)));
+  if (!field) return res.status(404).json({ error: "Field not found" });
+
+  const { name, options } = req.body as { name?: string; options?: string[] };
+  const updates: Record<string, unknown> = {};
+  if (name) updates.name = name;
+  if (options !== undefined) updates.options = JSON.stringify(options);
+
+  const [updated] = await db.update(jiraCustomFieldDefsTable).set(updates as any).where(eq(jiraCustomFieldDefsTable.id, field.id)).returning();
+  res.json(parseFieldDef(updated));
+});
+
+router.delete("/projects/:key/fields/:fieldId", async (req: Request, res: Response) => {
+  const userId = requireAuth(req, res);
+  if (!userId) return;
+
+  const [project] = await db.select().from(jiraProjectsTable).where(eq(jiraProjectsTable.key, req.params.key));
+  if (!project) return res.status(404).json({ error: "Project not found" });
+
+  const [field] = await db.select().from(jiraCustomFieldDefsTable)
+    .where(and(eq(jiraCustomFieldDefsTable.id, req.params.fieldId), eq(jiraCustomFieldDefsTable.projectId, project.id)));
+  if (!field) return res.status(404).json({ error: "Field not found" });
+
+  await db.delete(jiraCustomFieldDefsTable).where(eq(jiraCustomFieldDefsTable.id, field.id));
+  res.json({ success: true });
+});
+
 // ─── Issues ───────────────────────────────────────────────────────────────────
 
 async function enrichIssue(issue: typeof jiraIssuesTable.$inferSelect, projectKey: string) {
@@ -114,12 +195,14 @@ router.get("/projects/:key/issues", async (req: Request, res: Response) => {
   const [project] = await db.select().from(jiraProjectsTable).where(eq(jiraProjectsTable.key, req.params.key));
   if (!project) return res.status(404).json({ error: "Project not found" });
 
-  const { status, type, priority, assigneeId } = req.query as Record<string, string>;
+  const { status, type, priority, assigneeId, search } = req.query as Record<string, string>;
   const conditions = [eq(jiraIssuesTable.projectId, project.id)];
   if (status) conditions.push(eq(jiraIssuesTable.status, status as any));
   if (type) conditions.push(eq(jiraIssuesTable.type, type as any));
   if (priority) conditions.push(eq(jiraIssuesTable.priority, priority as any));
-  if (assigneeId) conditions.push(eq(jiraIssuesTable.assigneeId, assigneeId));
+  if (assigneeId === "unassigned") conditions.push(sql`${jiraIssuesTable.assigneeId} IS NULL`);
+  else if (assigneeId) conditions.push(eq(jiraIssuesTable.assigneeId, assigneeId));
+  if (search) conditions.push(ilike(jiraIssuesTable.title, `%${search}%`));
 
   const issues = await db.select().from(jiraIssuesTable)
     .where(and(...conditions))
@@ -186,7 +269,10 @@ router.get("/issues/:id", async (req: Request, res: Response) => {
     author: await enrichUser(c.authorId),
   })));
 
-  res.json({ ...enriched, comments: enrichedComments });
+  const customFieldValues = await db.select().from(jiraCustomFieldValuesTable)
+    .where(eq(jiraCustomFieldValuesTable.issueId, issue.id));
+
+  res.json({ ...enriched, comments: enrichedComments, customFieldValues });
 });
 
 router.patch("/issues/:id", async (req: Request, res: Response) => {
@@ -231,6 +317,35 @@ router.patch("/issues/:id/status", async (req: Request, res: Response) => {
   res.json(await enrichIssue(updated, project!.key));
 });
 
+router.patch("/issues/:id/custom-fields", async (req: Request, res: Response) => {
+  const userId = requireAuth(req, res);
+  if (!userId) return;
+
+  const [issue] = await db.select().from(jiraIssuesTable).where(eq(jiraIssuesTable.id, req.params.id));
+  if (!issue) return res.status(404).json({ error: "Issue not found" });
+
+  const { values } = req.body as { values: Record<string, string | null> };
+  if (!values || typeof values !== "object") return res.status(400).json({ error: "values object required" });
+
+  for (const [fieldId, value] of Object.entries(values)) {
+    if (value === null || value === "") {
+      await db.delete(jiraCustomFieldValuesTable)
+        .where(and(eq(jiraCustomFieldValuesTable.issueId, issue.id), eq(jiraCustomFieldValuesTable.fieldId, fieldId)));
+    } else {
+      await db.insert(jiraCustomFieldValuesTable)
+        .values({ issueId: issue.id, fieldId, value })
+        .onConflictDoUpdate({
+          target: [jiraCustomFieldValuesTable.issueId, jiraCustomFieldValuesTable.fieldId],
+          set: { value, updatedAt: new Date() },
+        });
+    }
+  }
+
+  const updated = await db.select().from(jiraCustomFieldValuesTable)
+    .where(eq(jiraCustomFieldValuesTable.issueId, issue.id));
+  res.json({ customFieldValues: updated });
+});
+
 router.delete("/issues/:id", async (req: Request, res: Response) => {
   const userId = requireAuth(req, res);
   if (!userId) return;
@@ -240,6 +355,74 @@ router.delete("/issues/:id", async (req: Request, res: Response) => {
 
   await db.delete(jiraIssuesTable).where(eq(jiraIssuesTable.id, issue.id));
   res.json({ success: true });
+});
+
+// ─── Export ───────────────────────────────────────────────────────────────────
+
+router.get("/projects/:key/issues/export", async (req: Request, res: Response) => {
+  const userId = requireAuth(req, res);
+  if (!userId) return;
+
+  const [project] = await db.select().from(jiraProjectsTable).where(eq(jiraProjectsTable.key, req.params.key));
+  if (!project) return res.status(404).json({ error: "Project not found" });
+
+  const { status, type, priority, assigneeId, search } = req.query as Record<string, string>;
+  const conditions = [eq(jiraIssuesTable.projectId, project.id)];
+  if (status) conditions.push(eq(jiraIssuesTable.status, status as any));
+  if (type) conditions.push(eq(jiraIssuesTable.type, type as any));
+  if (priority) conditions.push(eq(jiraIssuesTable.priority, priority as any));
+  if (assigneeId === "unassigned") conditions.push(sql`${jiraIssuesTable.assigneeId} IS NULL`);
+  else if (assigneeId) conditions.push(eq(jiraIssuesTable.assigneeId, assigneeId));
+  if (search) conditions.push(ilike(jiraIssuesTable.title, `%${search}%`));
+
+  const issues = await db.select().from(jiraIssuesTable)
+    .where(and(...conditions))
+    .orderBy(asc(jiraIssuesTable.position), desc(jiraIssuesTable.createdAt));
+
+  const fieldDefs = await db.select().from(jiraCustomFieldDefsTable)
+    .where(eq(jiraCustomFieldDefsTable.projectId, project.id))
+    .orderBy(asc(jiraCustomFieldDefsTable.position));
+
+  const allUsers = await db.select({ id: usersTable.id, username: usersTable.username }).from(usersTable);
+  const userMap = new Map(allUsers.map(u => [u.id, u.username ?? ""]));
+
+  let allValues: (typeof jiraCustomFieldValuesTable.$inferSelect)[] = [];
+  if (issues.length > 0) {
+    allValues = await db.select().from(jiraCustomFieldValuesTable)
+      .where(inArray(jiraCustomFieldValuesTable.issueId, issues.map(i => i.id)));
+  }
+
+  const valueMap = new Map<string, Map<string, string>>();
+  for (const v of allValues) {
+    if (!valueMap.has(v.issueId)) valueMap.set(v.issueId, new Map());
+    valueMap.get(v.issueId)!.set(v.fieldId, v.value ?? "");
+  }
+
+  const csvEscape = (val: string) => `"${String(val ?? "").replace(/"/g, '""')}"`;
+  const headers = ["Key", "Title", "Type", "Status", "Priority", "Assignee", "Reporter", "Created", "Updated", ...fieldDefs.map(f => f.name)];
+
+  const rows = [
+    headers.map(csvEscape).join(","),
+    ...issues.map(issue => {
+      const issueVals = valueMap.get(issue.id) ?? new Map<string, string>();
+      return [
+        `${project.key}-${issue.number}`,
+        issue.title,
+        issue.type,
+        issue.status,
+        issue.priority,
+        issue.assigneeId ? (userMap.get(issue.assigneeId) ?? "") : "",
+        userMap.get(issue.reporterId) ?? "",
+        new Date(issue.createdAt).toISOString().split("T")[0],
+        new Date(issue.updatedAt).toISOString().split("T")[0],
+        ...fieldDefs.map(f => issueVals.get(f.id) ?? ""),
+      ].map(csvEscape).join(",");
+    }),
+  ];
+
+  res.setHeader("Content-Type", "text/csv");
+  res.setHeader("Content-Disposition", `attachment; filename="${project.key}-issues.csv"`);
+  res.send(rows.join("\n"));
 });
 
 // ─── Comments ─────────────────────────────────────────────────────────────────
