@@ -2,10 +2,16 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import type { Issue, Comment, Status, IssueFilters } from "@/lib/types";
 
-export function useIssues(projectKey: string, filters?: IssueFilters) {
+export function useIssues(projectKey: string, filters?: IssueFilters, jql?: string) {
   return useQuery<Issue[]>({
-    queryKey: ["issues", projectKey, filters],
+    queryKey: ["issues", projectKey, jql ?? filters],
     queryFn: () => {
+      if (jql !== undefined) {
+        const params = new URLSearchParams();
+        if (jql.trim()) params.set("jql", jql.trim());
+        const qs = params.toString();
+        return apiFetch(`/projects/${projectKey}/issues${qs ? `?${qs}` : ""}`);
+      }
       const params = new URLSearchParams();
       if (filters?.search) params.set("search", filters.search);
       if (filters?.status) params.set("status", filters.status);

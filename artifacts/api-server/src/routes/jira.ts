@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { db, jiraProjectsTable, jiraIssuesTable, jiraCommentsTable, usersTable, jiraCustomFieldDefsTable, jiraCustomFieldValuesTable } from "@workspace/db";
 import { eq, and, desc, asc, sql, ilike, inArray } from "drizzle-orm";
+import { parseJQL, JQLError } from "../services/jqlParser.js";
 
 const router = Router();
 
@@ -195,20 +196,45 @@ router.get("/projects/:key/issues", async (req: Request, res: Response) => {
   const [project] = await db.select().from(jiraProjectsTable).where(eq(jiraProjectsTable.key, req.params.key));
   if (!project) return res.status(404).json({ error: "Project not found" });
 
-  const { status, type, priority, assigneeId, search } = req.query as Record<string, string>;
-  const conditions = [eq(jiraIssuesTable.projectId, project.id)];
-  if (status) conditions.push(eq(jiraIssuesTable.status, status as any));
-  if (type) conditions.push(eq(jiraIssuesTable.type, type as any));
-  if (priority) conditions.push(eq(jiraIssuesTable.priority, priority as any));
-  if (assigneeId === "unassigned") conditions.push(sql`${jiraIssuesTable.assigneeId} IS NULL`);
-  else if (assigneeId) conditions.push(eq(jiraIssuesTable.assigneeId, assigneeId));
-  if (search) conditions.push(ilike(jiraIssuesTable.title, `%${search}%`));
+  const { jql, status, type, priority, assigneeId, search } = req.query as Record<string, string>;
 
-  const issues = await db.select().from(jiraIssuesTable)
-    .where(and(...conditions))
-    .orderBy(asc(jiraIssuesTable.position), desc(jiraIssuesTable.createdAt));
+  let conditions: any[];
+  let orderOverride: { field: string; dir: "asc" | "desc" } | undefined;
 
-  const enriched = await Promise.all(issues.map(i => enrichIssue(i, project.key)));
+  if (jql) {
+    try {
+      const parsed = await parseJQL(jql, project.id);
+      conditions = parsed.conditions;
+      orderOverride = parsed.order;
+    } catch (e) {
+      if (e instanceof JQLError) return res.status(400).json({ error: e.message, jqlError: true });
+      throw e;
+    }
+  } else {
+    conditions = [eq(jiraIssuesTable.projectId, project.id)];
+    if (status) conditions.push(eq(jiraIssuesTable.status, status as any));
+    if (type) conditions.push(eq(jiraIssuesTable.type, type as any));
+    if (priority) conditions.push(eq(jiraIssuesTable.priority, priority as any));
+    if (assigneeId === "unassigned") conditions.push(sql`${jiraIssuesTable.assigneeId} IS NULL`);
+    else if (assigneeId) conditions.push(eq(jiraIssuesTable.assigneeId, assigneeId));
+    if (search) conditions.push(ilike(jiraIssuesTable.title, `%${search}%`));
+  }
+
+  let query = db.select().from(jiraIssuesTable).where(and(...conditions));
+
+  if (orderOverride) {
+    const col = orderOverride.field === "created" ? jiraIssuesTable.createdAt
+      : orderOverride.field === "updated" ? jiraIssuesTable.updatedAt
+      : orderOverride.field === "priority" ? jiraIssuesTable.priority
+      : orderOverride.field === "status" ? jiraIssuesTable.status
+      : jiraIssuesTable.createdAt;
+    const issues = await (query as any).orderBy(orderOverride.dir === "desc" ? desc(col) : asc(col));
+    const enriched = await Promise.all(issues.map((i: any) => enrichIssue(i, project.key)));
+    return res.json(enriched);
+  }
+
+  const issues = await (query as any).orderBy(asc(jiraIssuesTable.position), desc(jiraIssuesTable.createdAt));
+  const enriched = await Promise.all(issues.map((i: any) => enrichIssue(i, project.key)));
   res.json(enriched);
 });
 
@@ -366,14 +392,26 @@ router.get("/projects/:key/issues/export", async (req: Request, res: Response) =
   const [project] = await db.select().from(jiraProjectsTable).where(eq(jiraProjectsTable.key, req.params.key));
   if (!project) return res.status(404).json({ error: "Project not found" });
 
-  const { status, type, priority, assigneeId, search } = req.query as Record<string, string>;
-  const conditions = [eq(jiraIssuesTable.projectId, project.id)];
-  if (status) conditions.push(eq(jiraIssuesTable.status, status as any));
-  if (type) conditions.push(eq(jiraIssuesTable.type, type as any));
-  if (priority) conditions.push(eq(jiraIssuesTable.priority, priority as any));
-  if (assigneeId === "unassigned") conditions.push(sql`${jiraIssuesTable.assigneeId} IS NULL`);
-  else if (assigneeId) conditions.push(eq(jiraIssuesTable.assigneeId, assigneeId));
-  if (search) conditions.push(ilike(jiraIssuesTable.title, `%${search}%`));
+  const { jql, status, type, priority, assigneeId, search } = req.query as Record<string, string>;
+  let conditions: any[];
+
+  if (jql) {
+    try {
+      const parsed = await parseJQL(jql, project.id);
+      conditions = parsed.conditions;
+    } catch (e) {
+      if (e instanceof JQLError) return res.status(400).json({ error: e.message, jqlError: true });
+      throw e;
+    }
+  } else {
+    conditions = [eq(jiraIssuesTable.projectId, project.id)];
+    if (status) conditions.push(eq(jiraIssuesTable.status, status as any));
+    if (type) conditions.push(eq(jiraIssuesTable.type, type as any));
+    if (priority) conditions.push(eq(jiraIssuesTable.priority, priority as any));
+    if (assigneeId === "unassigned") conditions.push(sql`${jiraIssuesTable.assigneeId} IS NULL`);
+    else if (assigneeId) conditions.push(eq(jiraIssuesTable.assigneeId, assigneeId));
+    if (search) conditions.push(ilike(jiraIssuesTable.title, `%${search}%`));
+  }
 
   const issues = await db.select().from(jiraIssuesTable)
     .where(and(...conditions))

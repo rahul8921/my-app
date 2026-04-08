@@ -1,61 +1,85 @@
-import { useState, useMemo } from "react";
+import { useState, useRef } from "react";
 import { useRoute } from "wouter";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useProject } from "@/hooks/use-projects";
 import { useIssues } from "@/hooks/use-issues";
-import { useUsers } from "@/hooks/use-users";
 import { CreateIssueDrawer } from "@/components/issues/CreateIssueDrawer";
 import { IssueDetailModal } from "@/components/issues/IssueDetailModal";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { TypeIcon, PriorityIcon, StatusBadge } from "@/components/issues/IssueIcons";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Plus, Loader2, List as ListIcon, Search, Download, X, Filter } from "lucide-react";
+import { Plus, Loader2, List as ListIcon, Download, Play, X, HelpCircle, ChevronDown, ChevronUp } from "lucide-react";
 import { format } from "date-fns";
-import type { IssueFilters } from "@/lib/types";
 
-const ALL = "__all__";
+const QUICK_FILTERS = [
+  { label: "All Bugs", jql: 'type = bug' },
+  { label: "High Priority", jql: 'priority in (high, critical)' },
+  { label: "Open Issues", jql: 'status != done' },
+  { label: "Unassigned", jql: 'assignee is EMPTY' },
+  { label: "In Progress", jql: 'status = "in progress"' },
+  { label: "Done", jql: 'status = done' },
+  { label: "Critical Bugs", jql: 'type = bug AND priority = critical' },
+  { label: "My Open Tasks", jql: 'status != done AND type = task' },
+];
+
+const SYNTAX_EXAMPLES = [
+  { label: "Filter by status", example: 'status = "in progress"' },
+  { label: "Multiple values", example: 'status in (todo, "in progress")' },
+  { label: "Exclude value", example: 'status != done' },
+  { label: "Text search", example: 'summary ~ "login bug"' },
+  { label: "Priority filter", example: 'priority in (high, critical)' },
+  { label: "Unassigned issues", example: 'assignee is EMPTY' },
+  { label: "Assigned to user", example: 'assignee = "username"' },
+  { label: "Created after date", example: 'created >= "2024-01-01"' },
+  { label: "Combine conditions", example: 'type = bug AND priority = high AND status != done' },
+  { label: "Order results", example: 'status != done ORDER BY created DESC' },
+];
 
 export default function ListView() {
   const [, params] = useRoute("/projects/:key/list");
   const projectKey = params?.key || "";
 
   const { data: project, isLoading: projLoading } = useProject(projectKey);
-  const { data: users } = useUsers();
 
-  const [filters, setFilters] = useState<IssueFilters>({});
+  const [jqlInput, setJqlInput] = useState("");
+  const [activeJql, setActiveJql] = useState("");
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const activeFilters = useMemo(() => {
-    return Object.fromEntries(Object.entries(filters).filter(([, v]) => v && v !== ALL));
-  }, [filters]);
+  const { data: issues, isLoading: issuesLoading, isError, error } = useIssues(projectKey, undefined, activeJql);
+  const jqlError = isError ? (error as Error)?.message : null;
 
-  const { data: issues, isLoading: issuesLoading } = useIssues(projectKey, activeFilters as IssueFilters);
-
-  const setFilter = (key: keyof IssueFilters, value: string) => {
-    setFilters(prev => ({ ...prev, [key]: value === ALL ? undefined : value || undefined }));
+  const runQuery = () => {
+    setActiveJql(jqlInput.trim());
   };
 
-  const removeFilter = (key: keyof IssueFilters) => {
-    setFilters(prev => { const next = { ...prev }; delete next[key]; return next; });
+  const clearQuery = () => {
+    setJqlInput("");
+    setActiveJql("");
+    textareaRef.current?.focus();
   };
 
-  const clearAllFilters = () => setFilters({});
+  const applyQuickFilter = (jql: string) => {
+    setJqlInput(jql);
+    setActiveJql(jql);
+  };
 
-  const activeFilterCount = Object.keys(activeFilters).length;
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      runQuery();
+    }
+  };
 
   const handleExport = async () => {
     setExporting(true);
     try {
       const params = new URLSearchParams();
-      if (activeFilters.search) params.set("search", activeFilters.search);
-      if (activeFilters.status) params.set("status", activeFilters.status);
-      if (activeFilters.type) params.set("type", activeFilters.type);
-      if (activeFilters.priority) params.set("priority", activeFilters.priority);
-      if (activeFilters.assigneeId) params.set("assigneeId", activeFilters.assigneeId);
+      if (activeJql.trim()) params.set("jql", activeJql.trim());
       const qs = params.toString();
       const res = await fetch(`/jira-api/projects/${projectKey}/issues/export${qs ? `?${qs}` : ""}`, {
         credentials: "include",
@@ -74,9 +98,7 @@ export default function ListView() {
     }
   };
 
-  const isLoading = projLoading || issuesLoading;
-
-  if (isLoading && !issues) {
+  if (projLoading && !project) {
     return (
       <AppLayout>
         <div className="flex-1 flex items-center justify-center">
@@ -90,8 +112,10 @@ export default function ListView() {
 
   return (
     <AppLayout>
-      <div className="flex flex-col h-full w-full max-w-7xl mx-auto px-8 py-6">
-        <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col h-full w-full max-w-7xl mx-auto px-8 py-6 gap-4">
+
+        {/* Header */}
+        <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 rounded-xl bg-secondary text-foreground flex items-center justify-center border border-border">
               <ListIcon className="w-6 h-6" />
@@ -105,7 +129,6 @@ export default function ListView() {
               <h1 className="text-2xl font-bold text-foreground leading-none">{project.name} Issues</h1>
             </div>
           </div>
-
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting}>
               {exporting ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Download className="w-4 h-4 mr-1.5" />}
@@ -119,119 +142,105 @@ export default function ListView() {
           </div>
         </div>
 
-        <div className="bg-card border rounded-xl p-3 mb-4 flex flex-wrap gap-2 items-center">
-          <div className="flex items-center gap-1.5 text-muted-foreground">
-            <Filter className="w-4 h-4" />
-            <span className="text-xs font-semibold uppercase tracking-wider">Filter</span>
+        {/* JQL Query Box */}
+        <div className="bg-card border rounded-xl shadow-sm overflow-hidden">
+          <div className="p-3 border-b border-border bg-secondary/30 flex items-center gap-2">
+            <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">JQL Query</span>
+            <button
+              onClick={() => setShowHelp(h => !h)}
+              className="ml-auto flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <HelpCircle className="w-3.5 h-3.5" />
+              Syntax help
+              {showHelp ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </button>
           </div>
 
-          <div className="relative flex-1 min-w-40 max-w-56">
-            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Search by title..."
-              className="pl-8 h-8 text-sm bg-background"
-              value={filters.search || ""}
-              onChange={e => setFilter("search", e.target.value)}
-            />
-          </div>
+          <div className="p-3">
+            <div className={`relative border rounded-lg transition-colors ${jqlError ? "border-destructive" : "border-border focus-within:border-primary"}`}>
+              <Textarea
+                ref={textareaRef}
+                value={jqlInput}
+                onChange={e => setJqlInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={`type = bug AND priority in (high, critical) AND status != done`}
+                className="font-mono text-sm min-h-[52px] max-h-32 resize-none border-0 focus-visible:ring-0 focus-visible:ring-offset-0 bg-transparent pr-24 leading-relaxed"
+                rows={2}
+              />
+              <div className="absolute right-2 top-2 flex items-center gap-1">
+                {jqlInput && (
+                  <button onClick={clearQuery} className="p-1 rounded hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors">
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+                <Button size="sm" onClick={runQuery} className="h-7 gap-1 text-xs">
+                  <Play className="w-3 h-3" />
+                  Run
+                  <span className="text-muted-foreground/70 text-[10px] hidden sm:inline">(⌘↵)</span>
+                </Button>
+              </div>
+            </div>
 
-          <Select value={filters.status || ALL} onValueChange={v => setFilter("status", v)}>
-            <SelectTrigger className="h-8 w-32 text-sm bg-background">
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>All Statuses</SelectItem>
-              <SelectItem value="todo">To Do</SelectItem>
-              <SelectItem value="in_progress">In Progress</SelectItem>
-              <SelectItem value="review">In Review</SelectItem>
-              <SelectItem value="done">Done</SelectItem>
-            </SelectContent>
-          </Select>
+            {jqlError && (
+              <div className="mt-2 p-2.5 bg-destructive/10 border border-destructive/30 rounded-md text-xs font-mono text-destructive whitespace-pre-wrap leading-relaxed">
+                {jqlError}
+              </div>
+            )}
 
-          <Select value={filters.type || ALL} onValueChange={v => setFilter("type", v)}>
-            <SelectTrigger className="h-8 w-28 text-sm bg-background">
-              <SelectValue placeholder="Type" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>All Types</SelectItem>
-              <SelectItem value="bug">Bug</SelectItem>
-              <SelectItem value="task">Task</SelectItem>
-              <SelectItem value="story">Story</SelectItem>
-              <SelectItem value="epic">Epic</SelectItem>
-            </SelectContent>
-          </Select>
-
-          <Select value={filters.priority || ALL} onValueChange={v => setFilter("priority", v)}>
-            <SelectTrigger className="h-8 w-32 text-sm bg-background">
-              <SelectValue placeholder="Priority" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>All Priorities</SelectItem>
-              <SelectItem value="low">Low</SelectItem>
-              <SelectItem value="medium">Medium</SelectItem>
-              <SelectItem value="high">High</SelectItem>
-              <SelectItem value="critical">Critical</SelectItem>
-            </SelectContent>
-          </Select>
-
-          <Select value={filters.assigneeId || ALL} onValueChange={v => setFilter("assigneeId", v)}>
-            <SelectTrigger className="h-8 w-36 text-sm bg-background">
-              <SelectValue placeholder="Assignee" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>All Assignees</SelectItem>
-              <SelectItem value="unassigned">Unassigned</SelectItem>
-              {users?.map(u => (
-                <SelectItem key={u.id} value={u.id}>{u.username}</SelectItem>
+            {/* Quick Filters */}
+            <div className="flex flex-wrap gap-1.5 mt-3">
+              <span className="text-xs text-muted-foreground self-center mr-1">Quick:</span>
+              {QUICK_FILTERS.map(f => (
+                <button
+                  key={f.label}
+                  onClick={() => applyQuickFilter(f.jql)}
+                  className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${activeJql === f.jql
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "bg-background border-border text-muted-foreground hover:text-foreground hover:border-foreground/40"
+                    }`}
+                >
+                  {f.label}
+                </button>
               ))}
-            </SelectContent>
-          </Select>
+            </div>
+          </div>
 
-          {activeFilterCount > 0 && (
-            <Button variant="ghost" size="sm" className="h-8 text-muted-foreground hover:text-foreground px-2 ml-auto" onClick={clearAllFilters}>
-              <X className="w-3.5 h-3.5 mr-1" /> Clear all
-            </Button>
+          {/* Syntax Help Panel */}
+          {showHelp && (
+            <div className="border-t border-border p-4 bg-secondary/20">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3">Syntax Reference</h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {SYNTAX_EXAMPLES.map(ex => (
+                  <button
+                    key={ex.label}
+                    onClick={() => { setJqlInput(ex.example); textareaRef.current?.focus(); }}
+                    className="text-left p-2.5 rounded-lg bg-background border border-border hover:border-primary/50 hover:bg-primary/5 transition-colors group"
+                  >
+                    <div className="text-xs text-muted-foreground mb-1 group-hover:text-foreground transition-colors">{ex.label}</div>
+                    <code className="text-[11px] font-mono text-foreground/80">{ex.example}</code>
+                  </button>
+                ))}
+              </div>
+              <div className="mt-3 text-xs text-muted-foreground space-y-1">
+                <div><span className="font-semibold">Fields:</span> status, type, priority, assignee, summary, text, created, updated</div>
+                <div><span className="font-semibold">Operators:</span> = != ~ !~ &gt; &lt; &gt;= &lt;= in (...) not in (...) is EMPTY is not EMPTY</div>
+                <div><span className="font-semibold">Logic:</span> AND</div>
+              </div>
+            </div>
           )}
         </div>
 
-        {activeFilterCount > 0 && (
-          <div className="flex flex-wrap gap-1.5 mb-3">
-            {activeFilters.search && (
-              <Badge variant="secondary" className="gap-1 pr-1 text-xs">
-                Search: "{activeFilters.search}"
-                <button onClick={() => removeFilter("search")} className="ml-0.5 hover:text-foreground"><X className="w-3 h-3" /></button>
-              </Badge>
-            )}
-            {activeFilters.status && (
-              <Badge variant="secondary" className="gap-1 pr-1 text-xs">
-                Status: {activeFilters.status.replace("_", " ")}
-                <button onClick={() => removeFilter("status")} className="ml-0.5 hover:text-foreground"><X className="w-3 h-3" /></button>
-              </Badge>
-            )}
-            {activeFilters.type && (
-              <Badge variant="secondary" className="gap-1 pr-1 text-xs">
-                Type: {activeFilters.type}
-                <button onClick={() => removeFilter("type")} className="ml-0.5 hover:text-foreground"><X className="w-3 h-3" /></button>
-              </Badge>
-            )}
-            {activeFilters.priority && (
-              <Badge variant="secondary" className="gap-1 pr-1 text-xs">
-                Priority: {activeFilters.priority}
-                <button onClick={() => removeFilter("priority")} className="ml-0.5 hover:text-foreground"><X className="w-3 h-3" /></button>
-              </Badge>
-            )}
-            {activeFilters.assigneeId && (
-              <Badge variant="secondary" className="gap-1 pr-1 text-xs">
-                Assignee: {activeFilters.assigneeId === "unassigned" ? "Unassigned" : (users?.find(u => u.id === activeFilters.assigneeId)?.username ?? activeFilters.assigneeId)}
-                <button onClick={() => removeFilter("assigneeId")} className="ml-0.5 hover:text-foreground"><X className="w-3 h-3" /></button>
-              </Badge>
-            )}
-            <span className="text-xs text-muted-foreground flex items-center ml-1">
-              {issues?.length ?? 0} result{(issues?.length ?? 0) !== 1 ? "s" : ""}
+        {/* Results count */}
+        {!isError && activeJql && (
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">
+              {issuesLoading ? "Searching…" : `${issues?.length ?? 0} issue${(issues?.length ?? 0) !== 1 ? "s" : ""} found`}
             </span>
+            <code className="text-xs font-mono bg-secondary px-2 py-0.5 rounded text-muted-foreground truncate max-w-md">{activeJql}</code>
           </div>
         )}
 
+        {/* Issue Table */}
         <div className="bg-card border rounded-2xl shadow-sm overflow-hidden flex-1 flex flex-col">
           <div className="overflow-x-auto">
             <table className="w-full text-sm text-left">
@@ -253,10 +262,16 @@ export default function ListView() {
                       <Loader2 className="w-5 h-5 animate-spin mx-auto" />
                     </td>
                   </tr>
+                ) : isError ? (
+                  <tr>
+                    <td colSpan={7} className="px-6 py-12 text-center text-muted-foreground italic">
+                      Fix the query above to see results.
+                    </td>
+                  </tr>
                 ) : issues?.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="px-6 py-12 text-center text-muted-foreground italic">
-                      {activeFilterCount > 0 ? "No issues match the current filters." : "No issues yet. Create your first issue!"}
+                      {activeJql ? "No issues match this query." : "No issues yet. Create your first issue!"}
                     </td>
                   </tr>
                 ) : (
