@@ -47,7 +47,7 @@ if (process.env.NODE_ENV === "production") {
   const staticDir = process.env.STATIC_DIR
     ?? path.resolve(__dirname, "..", "..", "betting-app", "dist", "public");
   app.use(express.static(staticDir));
-  app.get("*", (_req: Request, res: Response) => {
+  app.get("*splat", (_req: Request, res: Response) => {
     res.sendFile(path.join(staticDir, "index.html"));
   });
 }
