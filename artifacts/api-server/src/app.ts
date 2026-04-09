@@ -43,7 +43,9 @@ app.use("/jira-api", jiraRouter);
 
 // Serve built frontend in production
 if (process.env.NODE_ENV === "production") {
-  const staticDir = path.resolve(__dirname, "..", "..", "betting-app", "dist", "public");
+  // Works both locally (relative to dist/) and in Docker (/app/artifacts/...)
+  const staticDir = process.env.STATIC_DIR
+    ?? path.resolve(__dirname, "..", "..", "betting-app", "dist", "public");
   app.use(express.static(staticDir));
   app.get("*", (_req: Request, res: Response) => {
     res.sendFile(path.join(staticDir, "index.html"));
