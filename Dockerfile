@@ -28,10 +28,12 @@ WORKDIR /app
 COPY lib/ ./lib/
 COPY artifacts/ ./artifacts/
 
-# Build frontend (BASE_PATH=/ PORT=3000 just to satisfy any checks)
+# Build frontend (VITE_ vars must be baked in at build time)
 ENV BASE_PATH=/
 ENV PORT=3000
 ENV NODE_ENV=production
+ENV VITE_SUPABASE_URL=https://hobovhxdusjfolamevro.supabase.co
+ENV VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhvYm92aHhkdXNqZm9sYW1ldnJvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU2MTcwMjIsImV4cCI6MjA5MTE5MzAyMn0.25HUzYaoc_EKiBjD6OWGpY9-iUeOoVtWC8JqBhIbh3E
 RUN pnpm --filter betting-app run build
 
 # Build backend
