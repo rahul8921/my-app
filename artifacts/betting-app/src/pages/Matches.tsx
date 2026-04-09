@@ -1,4 +1,4 @@
-import { useAuth } from "@workspace/replit-auth-web";
+import { useAuth } from "@/hooks/use-auth";
 import { useListMatches, useListMyBets } from "@workspace/api-client-react";
 import { MatchCard } from "@/components/MatchCard";
 import { Trophy, Activity, History, RefreshCw } from "lucide-react";
@@ -54,7 +54,8 @@ export default function Matches() {
     return 2;
   };
 
-  const filteredMatches = (matches?.filter(m => filter === "all" || m.status === filter) || [])
+  const matchesArray = Array.isArray(matches) ? matches : [];
+  const filteredMatches = matchesArray.filter(m => filter === "all" || m.status === filter)
     .slice()
     .sort((a, b) => {
       const orderDiff = statusOrder(a.status) - statusOrder(b.status);

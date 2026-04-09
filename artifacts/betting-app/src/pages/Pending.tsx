@@ -1,4 +1,4 @@
-import { useAuth } from "@workspace/replit-auth-web";
+import { useAuth } from "@/hooks/use-auth";
 import { Clock, ShieldX, LogOut } from "lucide-react";
 
 export default function Pending() {

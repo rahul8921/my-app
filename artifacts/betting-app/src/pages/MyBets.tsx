@@ -1,4 +1,14 @@
 import { useState } from "react";
+import { supabase } from "@/lib/supabase";
+
+async function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token;
+  return fetch(url, {
+    ...options,
+    headers: { ...(options.headers ?? {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+  });
+}
 import { useQueryClient } from "@tanstack/react-query";
 import { useListMyBets } from "@workspace/api-client-react";
 
@@ -16,10 +26,9 @@ import {
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 async function updateBet(betId: number, data: { amount?: number; team?: string }) {
-  const res = await fetch(`${BASE}/api/bets/${betId}`, {
+  const res = await authFetch(`${BASE}/api/bets/${betId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    credentials: "include",
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -30,9 +39,8 @@ async function updateBet(betId: number, data: { amount?: number; team?: string }
 }
 
 async function cancelBet(betId: number) {
-  const res = await fetch(`${BASE}/api/bets/${betId}`, {
+  const res = await authFetch(`${BASE}/api/bets/${betId}`, {
     method: "DELETE",
-    credentials: "include",
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));

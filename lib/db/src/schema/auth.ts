@@ -21,6 +21,7 @@ export const usersTable = pgTable("users", {
   lastName: varchar("last_name"),
   profileImageUrl: varchar("profile_image_url"),
   customAvatarUrl: varchar("custom_avatar_url", { length: 524288 }),
+  passwordHash: varchar("password_hash"),
   isAdmin: boolean("is_admin").notNull().default(false),
   status: varchar("status", { enum: ["pending", "approved", "rejected"] })
     .notNull()

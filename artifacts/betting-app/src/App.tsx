@@ -2,7 +2,7 @@ import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { useAuth } from "@workspace/replit-auth-web";
+import { useAuth } from "@/hooks/use-auth";
 import { Loader2 } from "lucide-react";
 
 import { Navbar } from "@/components/Navbar";
@@ -49,7 +49,7 @@ function PublicRoute({ component: Component }: { component: React.ComponentType 
 function RequiresLoginRoute({ component: Component }: { component: React.ComponentType }) {
   const { isAuthenticated, isLoading } = useAuth();
   if (isLoading) return <LoadingScreen />;
-  if (!isAuthenticated) return <Login />;
+  if (!isAuthenticated) { window.location.href = "/login"; return null; }
   return <AppShell><Component /></AppShell>;
 }
 
@@ -78,6 +78,9 @@ function Router() {
       </Route>
       <Route path="/leaderboard">
         {() => <PublicRoute component={Leaderboard} />}
+      </Route>
+      <Route path="/login">
+        {() => <Login />}
       </Route>
       <Route path="/my-bets">
         {() => <RequiresLoginRoute component={MyBets} />}

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
-import { useAuth } from "@workspace/replit-auth-web";
+import { useAuth } from "@/hooks/use-auth";
 import { Crown, LayoutDashboard, Ticket, Trophy, LogOut, BarChart2, LogIn } from "lucide-react";
 import { motion } from "framer-motion";
 import { ProfilePhotoDialog } from "@/components/ProfilePhotoDialog";

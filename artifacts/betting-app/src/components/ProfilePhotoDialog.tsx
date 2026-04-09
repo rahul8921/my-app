@@ -1,4 +1,14 @@
 import { useRef, useState } from "react";
+import { supabase } from "@/lib/supabase";
+
+async function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token;
+  return fetch(url, {
+    ...options,
+    headers: { ...(options.headers ?? {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+  });
+}
 import { useQueryClient } from "@tanstack/react-query";
 import { Camera, Upload, X } from "lucide-react";
 import {
@@ -58,9 +68,8 @@ export function ProfilePhotoDialog({ open, onClose, currentPhoto, username }: Pr
     if (!preview) return;
     setUploading(true);
     try {
-      const res = await fetch(`${BASE}/api/me/photo`, {
+      const res = await authFetch(`${BASE}/api/me/photo`, {
         method: "PATCH",
-        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ imageData: preview }),
       });

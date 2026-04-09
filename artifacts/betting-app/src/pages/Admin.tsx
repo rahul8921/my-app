@@ -1,5 +1,18 @@
 import { useState } from "react";
 import { format } from "date-fns";
+import { supabase } from "@/lib/supabase";
+
+async function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token;
+  return fetch(url, {
+    ...options,
+    headers: {
+      ...(options.headers ?? {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+}
 
 import { 
   useListUsers, 
@@ -88,9 +101,8 @@ export default function Admin() {
   async function handleFixAllTimes() {
     setFixingTimes(true);
     try {
-      const res = await fetch(`${BASE}/api/admin/fix-match-times`, {
+      const res = await authFetch(`${BASE}/api/admin/fix-match-times`, {
         method: "POST",
-        credentials: "include",
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Fix failed");
@@ -107,9 +119,8 @@ export default function Admin() {
     if (!editMatchId || !editMatchDate) return;
     const matchDateET = editMatchDate + ":00-04:00";
     try {
-      const res = await fetch(`${BASE}/api/matches/${editMatchId}`, {
+      const res = await authFetch(`${BASE}/api/matches/${editMatchId}`, {
         method: "PATCH",
-        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ matchDate: matchDateET }),
       });
@@ -126,9 +137,8 @@ export default function Admin() {
 
   async function handleSetResult(matchId: number, winner: string | null, score?: string) {
     try {
-      const res = await fetch(`${BASE}/api/matches/${matchId}/result`, {
+      const res = await authFetch(`${BASE}/api/matches/${matchId}/result`, {
         method: "PATCH",
-        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "finished", winner, ...(score ? { score } : {}) }),
       });
@@ -146,9 +156,8 @@ export default function Admin() {
   async function handleImportMatches() {
     setImporting(true);
     try {
-      const res = await fetch(`${BASE}/api/admin/import-matches`, {
+      const res = await authFetch(`${BASE}/api/admin/import-matches`, {
         method: "POST",
-        credentials: "include",
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Import failed");

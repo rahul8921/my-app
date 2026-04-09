@@ -1,4 +1,5 @@
 import * as oidc from "openid-client";
+import { createClient } from "@supabase/supabase-js";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { GetCurrentAuthUserResponse } from "@workspace/api-zod";
 import { db, usersTable } from "@workspace/db";
@@ -17,6 +18,12 @@ import {
 
 const OIDC_COOKIE_TTL = 10 * 60 * 1000;
 
+const supabaseAdmin = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  { auth: { autoRefreshToken: false, persistSession: false } },
+);
+
 const router: IRouter = Router();
 
 function getOrigin(req: Request): string {
@@ -29,7 +36,7 @@ function getOrigin(req: Request): string {
 function setSessionCookie(res: Response, sid: string) {
   res.cookie(SESSION_COOKIE, sid, {
     httpOnly: true,
-    secure: true,
+    secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
     maxAge: SESSION_TTL,
@@ -246,18 +253,172 @@ router.patch("/me/photo", async (req: Request, res: Response) => {
 });
 
 router.get("/logout", async (req: Request, res: Response) => {
-  const config = await getOidcConfig();
-  const origin = getOrigin(req);
-
   const sid = getSessionId(req);
   await clearSession(res, sid);
+  res.redirect("/");
+});
 
-  const endSessionUrl = oidc.buildEndSessionUrl(config, {
-    client_id: process.env.REPL_ID!,
-    post_logout_redirect_uri: origin,
-  });
+// ── Supabase auth sync ────────────────────────────────────────────────────────
 
-  res.redirect(endSessionUrl.href);
+router.post("/auth/supabase/sync", async (req: Request, res: Response) => {
+  const { access_token } = req.body as { access_token?: string };
+
+  if (!access_token) {
+    res.status(400).json({ error: "access_token required" });
+    return;
+  }
+
+  const { data: { user: supaUser }, error } = await supabaseAdmin.auth.getUser(access_token);
+
+  if (error || !supaUser) {
+    res.status(401).json({ error: "Invalid Supabase token" });
+    return;
+  }
+
+  const allUsers = await db.select({ id: usersTable.id }).from(usersTable);
+  const isFirstUser = allUsers.length === 0;
+
+  const username =
+    (supaUser.user_metadata?.username as string | undefined) ||
+    supaUser.email?.split("@")[0] ||
+    "user";
+
+  const [dbUser] = await db
+    .insert(usersTable)
+    .values({
+      id: supaUser.id,
+      email: supaUser.email ?? null,
+      username,
+      isAdmin: isFirstUser,
+      status: isFirstUser ? "approved" : "pending",
+    })
+    .onConflictDoUpdate({
+      target: usersTable.id,
+      set: { email: supaUser.email ?? null, updatedAt: new Date() },
+    })
+    .returning();
+
+  const sessionData: SessionData = {
+    user: {
+      id: dbUser.id,
+      username: dbUser.username ?? undefined,
+      firstName: dbUser.firstName ?? undefined,
+      lastName: dbUser.lastName ?? undefined,
+      profileImage: dbUser.customAvatarUrl ?? dbUser.profileImageUrl ?? undefined,
+      isAdmin: dbUser.isAdmin,
+      status: dbUser.status,
+    },
+    access_token,
+  };
+
+  const sid = await createSession(sessionData);
+  setSessionCookie(res, sid);
+  res.json({ success: true });
+});
+
+// ── Local auth (username/password) ───────────────────────────────────────────
+
+router.post("/auth/local/register", async (req: Request, res: Response) => {
+  const { username, password, firstName, lastName, email } = req.body as {
+    username?: string;
+    password?: string;
+    firstName?: string;
+    lastName?: string;
+    email?: string;
+  };
+
+  if (!username?.trim() || !password?.trim()) {
+    res.status(400).json({ error: "Username and password are required" });
+    return;
+  }
+
+  const [existing] = await db
+    .select()
+    .from(usersTable)
+    .where(eq(usersTable.username, username.trim()));
+
+  if (existing) {
+    res.status(400).json({ error: "Username already taken" });
+    return;
+  }
+
+  const passwordHash = await bcrypt.hash(password, 10);
+  const allUsers = await db.select({ id: usersTable.id }).from(usersTable);
+  const isFirstUser = allUsers.length === 0;
+
+  const [user] = await db
+    .insert(usersTable)
+    .values({
+      username: username.trim(),
+      passwordHash,
+      email: email?.trim() || null,
+      firstName: firstName?.trim() || null,
+      lastName: lastName?.trim() || null,
+      isAdmin: isFirstUser,
+      status: isFirstUser ? "approved" : "pending",
+    })
+    .returning();
+
+  const sessionData: SessionData = {
+    user: {
+      id: user.id,
+      username: user.username ?? undefined,
+      firstName: user.firstName ?? undefined,
+      lastName: user.lastName ?? undefined,
+      isAdmin: user.isAdmin,
+      status: user.status,
+    },
+    access_token: "local",
+  };
+
+  const sid = await createSession(sessionData);
+  setSessionCookie(res, sid);
+  res.json({ success: true, isAdmin: user.isAdmin });
+});
+
+router.post("/auth/local/login", async (req: Request, res: Response) => {
+  const { username, password } = req.body as {
+    username?: string;
+    password?: string;
+  };
+
+  if (!username?.trim() || !password?.trim()) {
+    res.status(400).json({ error: "Username and password are required" });
+    return;
+  }
+
+  const [user] = await db
+    .select()
+    .from(usersTable)
+    .where(eq(usersTable.username, username.trim()));
+
+  if (!user?.passwordHash) {
+    res.status(401).json({ error: "Invalid username or password" });
+    return;
+  }
+
+  const valid = await bcrypt.compare(password, user.passwordHash);
+  if (!valid) {
+    res.status(401).json({ error: "Invalid username or password" });
+    return;
+  }
+
+  const sessionData: SessionData = {
+    user: {
+      id: user.id,
+      username: user.username ?? undefined,
+      firstName: user.firstName ?? undefined,
+      lastName: user.lastName ?? undefined,
+      profileImage: user.customAvatarUrl ?? user.profileImageUrl ?? undefined,
+      isAdmin: user.isAdmin,
+      status: user.status,
+    },
+    access_token: "local",
+  };
+
+  const sid = await createSession(sessionData);
+  setSessionCookie(res, sid);
+  res.json({ success: true });
 });
 
 router.post(

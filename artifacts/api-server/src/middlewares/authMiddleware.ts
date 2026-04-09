@@ -1,6 +1,9 @@
 import * as oidc from "openid-client";
+import { createClient } from "@supabase/supabase-js";
 import { type Request, type Response, type NextFunction } from "express";
+import { eq } from "drizzle-orm";
 import type { AuthUser } from "@workspace/api-zod";
+import { db, usersTable } from "@workspace/db";
 import {
   clearSession,
   getOidcConfig,
@@ -25,6 +28,12 @@ declare global {
     }
   }
 }
+
+const supabaseAdmin = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  { auth: { autoRefreshToken: false, persistSession: false } },
+);
 
 async function refreshIfExpired(
   sid: string,
@@ -53,6 +62,69 @@ async function refreshIfExpired(
   }
 }
 
+async function resolveUserFromBearer(token: string): Promise<AuthUser | null> {
+  const { data: { user: supaUser }, error } = await supabaseAdmin.auth.getUser(token);
+  if (error || !supaUser) return null;
+
+  // Look up user by Supabase UUID first
+  let [dbUser] = await db.select().from(usersTable).where(eq(usersTable.id, supaUser.id));
+
+  // Fallback: look up by email (handles migrated users logging in for first time via Supabase)
+  if (!dbUser && supaUser.email) {
+    const [emailUser] = await db.select().from(usersTable).where(eq(usersTable.email, supaUser.email));
+    if (emailUser) {
+      // Re-link: update the placeholder UUID to the real Supabase UUID
+      const [updated] = await db
+        .update(usersTable)
+        .set({ id: supaUser.id, updatedAt: new Date() })
+        .where(eq(usersTable.email, supaUser.email))
+        .returning();
+      dbUser = updated;
+    }
+  }
+
+  if (dbUser) {
+    return {
+      id: dbUser.id,
+      username: dbUser.username ?? undefined,
+      firstName: dbUser.firstName ?? undefined,
+      lastName: dbUser.lastName ?? undefined,
+      profileImage: dbUser.customAvatarUrl ?? dbUser.profileImageUrl ?? undefined,
+      isAdmin: dbUser.isAdmin,
+      status: dbUser.status,
+    };
+  }
+
+  // Brand new user: create row
+  const allUsers = await db.select({ id: usersTable.id }).from(usersTable);
+  const isFirstUser = allUsers.length === 0;
+  const username =
+    (supaUser.user_metadata?.username as string | undefined) ||
+    supaUser.email?.split("@")[0] ||
+    "user";
+
+  const [newUser] = await db
+    .insert(usersTable)
+    .values({
+      id: supaUser.id,
+      email: supaUser.email ?? null,
+      username,
+      isAdmin: isFirstUser,
+      status: isFirstUser ? "approved" : "pending",
+    })
+    .returning();
+
+  return {
+    id: newUser.id,
+    username: newUser.username ?? undefined,
+    firstName: newUser.firstName ?? undefined,
+    lastName: newUser.lastName ?? undefined,
+    profileImage: newUser.customAvatarUrl ?? newUser.profileImageUrl ?? undefined,
+    isAdmin: newUser.isAdmin,
+    status: newUser.status,
+  };
+}
+
 export async function authMiddleware(
   req: Request,
   res: Response,
@@ -62,6 +134,19 @@ export async function authMiddleware(
     return this.user != null;
   } as Request["isAuthenticated"];
 
+  // ── Bearer token (Supabase JWT) ─────────────────────────────────────────────
+  const authHeader = req.headers.authorization;
+  if (authHeader?.startsWith("Bearer ")) {
+    const token = authHeader.slice(7);
+    const user = await resolveUserFromBearer(token);
+    if (user) {
+      req.user = user;
+      next();
+      return;
+    }
+  }
+
+  // ── Cookie-based session (fallback) ─────────────────────────────────────────
   const sid = getSessionId(req);
   if (!sid) {
     next();

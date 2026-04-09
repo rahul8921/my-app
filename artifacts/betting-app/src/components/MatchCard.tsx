@@ -5,7 +5,17 @@ import { usePlaceBet } from "@workspace/api-client-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatCurrency } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
-import { useAuth } from "@workspace/replit-auth-web";
+import { useAuth } from "@/hooks/use-auth";
+import { supabase } from "@/lib/supabase";
+
+async function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token;
+  return fetch(url, {
+    ...options,
+    headers: { ...(options.headers ?? {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+  });
+}
 
 type MatchBet = { username: string; profileImage?: string | null; team: string; amount: number };
 type MatchWithBets = Match & { bets?: MatchBet[] };
@@ -182,10 +192,9 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
         setEditOpen(false);
         return;
       }
-      const res = await fetch(`${BASE}/api/bets/${userBet.id}`, {
+      const res = await authFetch(`${BASE}/api/bets/${userBet.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        credentials: "include",
         body: JSON.stringify(payload),
       });
       if (!res.ok) {
@@ -207,9 +216,8 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
     if (!userBet) return;
     setCancelling(true);
     try {
-      const res = await fetch(`${BASE}/api/bets/${userBet.id}`, {
+      const res = await authFetch(`${BASE}/api/bets/${userBet.id}`, {
         method: "DELETE",
-        credentials: "include",
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
