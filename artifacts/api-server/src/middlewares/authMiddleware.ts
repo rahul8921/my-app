@@ -69,17 +69,12 @@ async function resolveUserFromBearer(token: string): Promise<AuthUser | null> {
   // Look up user by Supabase UUID first
   let [dbUser] = await db.select().from(usersTable).where(eq(usersTable.id, supaUser.id));
 
-  // Fallback: look up by email (handles migrated users logging in for first time via Supabase)
+  // Fallback: look up by email (handles migrated users whose DB id differs from Supabase UUID)
+  // We intentionally do NOT update the user's id — it is a primary key referenced by bets/other tables.
   if (!dbUser && supaUser.email) {
     const [emailUser] = await db.select().from(usersTable).where(eq(usersTable.email, supaUser.email));
     if (emailUser) {
-      // Re-link: update the placeholder UUID to the real Supabase UUID
-      const [updated] = await db
-        .update(usersTable)
-        .set({ id: supaUser.id, updatedAt: new Date() })
-        .where(eq(usersTable.email, supaUser.email))
-        .returning();
-      dbUser = updated;
+      dbUser = emailUser;
     }
   }
 
