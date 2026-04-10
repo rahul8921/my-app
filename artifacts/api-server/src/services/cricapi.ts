@@ -1,5 +1,5 @@
 import { db, matchesTable, betsTable } from "@workspace/db";
-import { eq, or } from "drizzle-orm";
+import { eq, or, and, isNull } from "drizzle-orm";
 import { logger } from "../lib/logger";
 
 const CRICAPI_BASE = "https://api.cricapi.com/v1";
@@ -273,23 +273,25 @@ export async function syncMatchesNow(): Promise<void> {
   const now = Date.now();
 
   // ── Quick DB check before touching the API ───────────────────────────────
-  // Fetch all upcoming/live DB matches to see if any have actually started
-  const dbMatches = await db
-    .select()
-    .from(matchesTable)
-    .where(or(eq(matchesTable.status, "upcoming"), eq(matchesTable.status, "live")));
+  // Fetch upcoming/live matches + finished matches missing a score (backfill)
+  const [activematches, scorelessFinished] = await Promise.all([
+    db.select().from(matchesTable)
+      .where(or(eq(matchesTable.status, "upcoming"), eq(matchesTable.status, "live"))),
+    db.select().from(matchesTable)
+      .where(and(eq(matchesTable.status, "finished"), isNull(matchesTable.score))),
+  ]);
 
-  if (dbMatches.length === 0) {
-    return; // nothing to watch
-  }
+  const dbMatches = activematches;
+  const backfillMatches = scorelessFinished;
 
-  // Only proceed if at least one match is past its scheduled start time (5-min grace)
+  // Only proceed if at least one active match is past its scheduled start time (5-min grace)
+  // OR there are finished matches needing score backfill
   const pastMatches = dbMatches.filter(
     m => new Date(m.matchDate).getTime() < now - 5 * 60 * 1000,
   );
 
-  if (pastMatches.length === 0) {
-    return; // all matches are still in the future — no CricAPI call needed
+  if (pastMatches.length === 0 && backfillMatches.length === 0) {
+    return; // nothing to sync
   }
 
   try {
@@ -420,6 +422,61 @@ export async function syncMatchesNow(): Promise<void> {
     }
 
     logger.info(`CricAPI: sync complete — ${updated}/${pastMatches.length} match(es) updated`);
+
+    // ── Backfill scores for finished matches that have no score ───────────────
+    if (backfillMatches.length > 0) {
+      logger.info(`CricAPI: backfilling scores for ${backfillMatches.length} finished match(es) with no score`);
+      let backfilled = 0;
+      for (const dbMatch of backfillMatches) {
+        try {
+          // Check cricScore first (covers recently finished matches)
+          const liveEntry = findCricScoreEntry(cricScoreEntries, dbMatch.team1, dbMatch.team2);
+          if (liveEntry && (liveEntry.ms === "result" || liveEntry.ms === "completed")) {
+            const { name: n1, abbr: a1 } = parseCricApiTeam(liveEntry.t1);
+            const isForward = teamNamesMatch(dbMatch.team1, n1) || teamNamesMatch(dbMatch.team1, a1);
+            const team1Score = isForward ? (liveEntry.t1s ?? "") : (liveEntry.t2s ?? "");
+            const team2Score = isForward ? (liveEntry.t2s ?? "") : (liveEntry.t1s ?? "");
+            if (team1Score || team2Score) {
+              await db.update(matchesTable)
+                .set({ score: JSON.stringify({ team1Score, team2Score, result: liveEntry.status ?? "" }), updatedAt: new Date() })
+                .where(eq(matchesTable.id, dbMatch.id));
+              logger.info(`CricAPI: backfilled score for match ${dbMatch.id} (${dbMatch.team1} vs ${dbMatch.team2}) from cricScore`);
+              backfilled++;
+              continue;
+            }
+          }
+
+          // Fallback: series_info match lookup
+          const matchTimestamp = new Date(dbMatch.matchDate).getTime();
+          const seriesMatch = seriesMatches.find(sm => {
+            if (!sm.teams || sm.teams.length < 2) return false;
+            const apiTs = new Date(sm.dateTimeGMT || sm.date).getTime();
+            if (Math.abs(matchTimestamp - apiTs) > 48 * 60 * 60 * 1000) return false;
+            return (
+              (teamNamesMatch(dbMatch.team1, sm.teams[0]) && teamNamesMatch(dbMatch.team2, sm.teams[1])) ||
+              (teamNamesMatch(dbMatch.team1, sm.teams[1]) && teamNamesMatch(dbMatch.team2, sm.teams[0]))
+            );
+          });
+
+          if (seriesMatch) {
+            const matchInfo = await fetchMatchInfo(seriesMatch.id);
+            const apiMatch = matchInfo ?? seriesMatch;
+            const scoreStr = buildScoreString(apiMatch.score);
+            if (scoreStr || apiMatch.status?.toLowerCase().includes("won")) {
+              const scoreValue = scoreStr || apiMatch.status || "";
+              await db.update(matchesTable)
+                .set({ score: scoreValue, updatedAt: new Date() })
+                .where(eq(matchesTable.id, dbMatch.id));
+              logger.info(`CricAPI: backfilled score for match ${dbMatch.id} (${dbMatch.team1} vs ${dbMatch.team2}): ${scoreValue}`);
+              backfilled++;
+            }
+          }
+        } catch (err) {
+          logger.warn({ err }, `CricAPI: backfill failed for match ${dbMatch.id}`);
+        }
+      }
+      logger.info(`CricAPI: backfilled ${backfilled}/${backfillMatches.length} finished match score(s)`);
+    }
   } catch (err) {
     logger.error({ err }, "CricAPI: sync failed");
   }

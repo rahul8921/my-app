@@ -124,15 +124,24 @@ router.post("/bets", async (req: Request, res: Response) => {
     return;
   }
 
-  const [bet] = await db
-    .insert(betsTable)
-    .values({
-      matchId,
-      userId: req.user.id,
-      team,
-      amount: amount.toString(),
-    })
-    .returning();
+  let bet: typeof betsTable.$inferSelect;
+  try {
+    const [inserted] = await db
+      .insert(betsTable)
+      .values({
+        matchId,
+        userId: req.user.id,
+        team,
+        amount: amount.toString(),
+      })
+      .returning();
+    bet = inserted;
+  } catch (err: any) {
+    const cause = err?.cause ?? err;
+    req.log?.error({ err, cause: cause?.message, detail: cause?.detail, constraint: cause?.constraint }, "Bet insert failed");
+    res.status(500).json({ error: cause?.detail || cause?.message || "Failed to place bet" });
+    return;
+  }
 
   // Build response with match info
   const allBets = await db

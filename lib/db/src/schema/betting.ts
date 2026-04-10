@@ -1,4 +1,4 @@
-import { numeric, pgTable, serial, text, timestamp, varchar } from "drizzle-orm/pg-core";
+import { integer, numeric, pgTable, serial, text, timestamp, varchar } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { usersTable } from "./auth";
@@ -20,7 +20,7 @@ export const matchesTable = pgTable("matches", {
 
 export const betsTable = pgTable("bets", {
   id: serial("id").primaryKey(),
-  matchId: serial("match_id")
+  matchId: integer("match_id")
     .notNull()
     .references(() => matchesTable.id, { onDelete: "cascade" }),
   userId: varchar("user_id")

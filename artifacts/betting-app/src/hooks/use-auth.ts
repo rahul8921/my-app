@@ -1,7 +1,8 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useCallback } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { setAuthTokenGetter } from "@workspace/api-client-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 export interface AuthUser {
   id: string;
@@ -14,7 +15,6 @@ export interface AuthUser {
 }
 
 // Register Supabase token getter once — all API calls will include Bearer token automatically.
-// supabase.auth.getSession() reads from in-memory cache (no network call) when token is fresh.
 setAuthTokenGetter(async () => {
   const { data: { session } } = await supabase.auth.getSession();
   return session?.access_token ?? null;
@@ -33,6 +33,8 @@ async function fetchUserFromBackend(accessToken: string): Promise<AuthUser | nul
   }
 }
 
+export const AUTH_QUERY_KEY = ["/api/auth/user"] as const;
+
 interface AuthState {
   user: AuthUser | null;
   isLoading: boolean;
@@ -42,40 +44,29 @@ interface AuthState {
 }
 
 export function useAuth(): AuthState {
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const queryClient = useQueryClient();
 
+  const { data: user = null, isLoading } = useQuery({
+    queryKey: AUTH_QUERY_KEY,
+    queryFn: async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return null;
+      return fetchUserFromBackend(session.access_token);
+    },
+    staleTime: Infinity,      // never auto-refetch — auth is event-driven
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+
+  // Subscribe to Supabase auth events and invalidate the cached user on change.
+  // Multiple components calling useAuth() all subscribe, but invalidateQueries is
+  // idempotent so the actual refetch only happens once.
   useEffect(() => {
-    let cancelled = false;
-
-    const handleSession = async (session: Session | null) => {
-      console.log("[useAuth] handleSession", session ? "has session" : "no session");
-      if (!session?.access_token) {
-        if (!cancelled) { setUser(null); setIsLoading(false); }
-        return;
-      }
-      const u = await fetchUserFromBackend(session.access_token);
-      console.log("[useAuth] backend user result:", u);
-      if (!cancelled) { setUser(u); setIsLoading(false); }
-    };
-
-    // Load initial session from Supabase cache
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      console.log("[useAuth] getSession result:", session ? "has session" : "no session");
-      if (!cancelled) handleSession(session);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
+      queryClient.invalidateQueries({ queryKey: AUTH_QUERY_KEY });
     });
-
-    // React to sign-in / sign-out events
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      console.log("[useAuth] onAuthStateChange event:", event, session ? "has session" : "no session");
-      if (!cancelled) handleSession(session);
-    });
-
-    return () => {
-      cancelled = true;
-      subscription.unsubscribe();
-    };
-  }, []);
+    return () => subscription.unsubscribe();
+  }, [queryClient]);
 
   const login = useCallback(() => {
     window.location.href = "/login";
@@ -83,9 +74,9 @@ export function useAuth(): AuthState {
 
   const logout = useCallback(async () => {
     await supabase.auth.signOut();
-    setUser(null);
+    queryClient.setQueryData(AUTH_QUERY_KEY, null);
     window.location.href = "/api/logout";
-  }, []);
+  }, [queryClient]);
 
   return { user, isLoading, isAuthenticated: !!user, login, logout };
 }
