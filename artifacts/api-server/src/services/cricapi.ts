@@ -347,8 +347,8 @@ export async function syncMatchesNow(): Promise<void> {
           }
 
         } else if (liveEntry.ms === "result" || liveEntry.ms === "completed") {
+          const result = liveEntry.status ?? "";
           if (dbMatch.status !== "finished") {
-            const result = liveEntry.status ?? "";
             updates["status"] = "finished";
             updates["score"] = JSON.stringify({ team1Score, team2Score, result });
 
@@ -358,6 +358,16 @@ export async function syncMatchesNow(): Promise<void> {
               if (dbMatch.winner !== winner) {
                 await settleMatchBets(dbMatch.id, winner);
               }
+            }
+          } else {
+            // Already finished — update score if we have better data (team scores were previously empty)
+            const hasTeamScores = (() => {
+              if (!dbMatch.score) return false;
+              try { const p = JSON.parse(dbMatch.score) as Record<string,string>; return !!(p.team1Score || p.team2Score); }
+              catch { return true; } // plain-text score already has data
+            })();
+            if (!hasTeamScores && (team1Score || team2Score || result)) {
+              updates["score"] = JSON.stringify({ team1Score, team2Score, result });
             }
           }
         }

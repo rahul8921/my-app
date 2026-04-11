@@ -62,8 +62,12 @@ export function useAuth(): AuthState {
   // Multiple components calling useAuth() all subscribe, but invalidateQueries is
   // idempotent so the actual refetch only happens once.
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
       queryClient.invalidateQueries({ queryKey: AUTH_QUERY_KEY });
+      // On login, trigger a fresh match sync so live scores and statuses are up to date
+      if (event === 'SIGNED_IN') {
+        queryClient.invalidateQueries({ queryKey: ['/api/matches'] });
+      }
     });
     return () => subscription.unsubscribe();
   }, [queryClient]);
