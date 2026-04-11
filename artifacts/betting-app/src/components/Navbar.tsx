@@ -65,7 +65,7 @@ export function Navbar() {
             <>
               <button
                 onClick={() => setPhotoDialogOpen(true)}
-                className="hidden sm:flex items-center gap-3 group"
+                className="flex items-center gap-3 group"
                 title="Change profile photo"
               >
                 <div className="relative">
@@ -80,7 +80,7 @@ export function Navbar() {
                     <span className="text-[8px] text-white font-bold leading-none">EDIT</span>
                   </div>
                 </div>
-                <div className="flex flex-col text-left">
+                <div className="hidden sm:flex flex-col text-left">
                   <span className="text-sm font-semibold text-white leading-none">{user.username}</span>
                   <span className="text-xs text-muted-foreground mt-1 leading-none capitalize">
                     {user.isAdmin ? 'Admin' : user.status}

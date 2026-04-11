@@ -115,7 +115,8 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
     if (!match.score) return null;
     try {
       const p = JSON.parse(match.score) as { team1Score?: string; team2Score?: string; result?: string };
-      if (p.team1Score || p.team2Score) return p;
+      // Return parsed object if it has the expected shape (even if scores are empty but result present)
+      if (p && typeof p === 'object' && ('team1Score' in p || 'team2Score' in p || 'result' in p)) return p;
     } catch { /* plain text score — handled in fallback */ }
     return null;
   })();
@@ -156,14 +157,17 @@ export function MatchCard({ match, userBet, isApproved }: MatchCardProps) {
     queryFn: () =>
       fetch(`${BASE}/api/scores?matchId=${match.id}`, { credentials: "include" })
         .then(r => r.json()),
-    enabled: isLive || (isFinished && !match.score),
+    enabled: isLive || (isFinished && (!match.score || !savedJsonScore?.team1Score)),
     staleTime: Infinity,
     refetchOnWindowFocus: false,
     refetchInterval: false,
   });
 
-  const liveScores = savedJsonScore
-    ?? (scoreData?.found && (scoreData.team1Score || scoreData.team2Score) ? scoreData : null);
+  // Prefer API score data if it has actual team scores; fall back to stored JSON (may only have result text)
+  const apiScoreData = scoreData?.found && (scoreData.team1Score || scoreData.team2Score) ? scoreData : null;
+  const liveScores = apiScoreData
+    ?? (savedJsonScore?.team1Score || savedJsonScore?.team2Score ? savedJsonScore : null)
+    ?? (savedJsonScore?.result ? savedJsonScore : null);
 
   const totalPool = match.totalBetsTeam1 + match.totalBetsTeam2;
   const team1Pct = totalPool === 0 ? 50 : Math.round((match.totalBetsTeam1 / totalPool) * 100);

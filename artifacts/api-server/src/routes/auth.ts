@@ -236,7 +236,13 @@ router.patch("/me/photo", async (req: Request, res: Response) => {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
-  const { imageData } = req.body as { imageData?: string };
+  const { imageData } = req.body as { imageData?: string | null };
+  // null means "reset to default"
+  if (imageData === null || imageData === "") {
+    await db.update(usersTable).set({ customAvatarUrl: null }).where(eq(usersTable.id, req.user.id));
+    res.json({ success: true, profileImage: null });
+    return;
+  }
   if (!imageData || !imageData.startsWith("data:image/")) {
     res.status(400).json({ error: "Invalid image data" });
     return;

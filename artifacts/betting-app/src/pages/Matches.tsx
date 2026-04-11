@@ -3,7 +3,7 @@ import { useListMatches, useListMyBets } from "@workspace/api-client-react";
 import { MatchCard } from "@/components/MatchCard";
 import { Trophy, Activity, History, RefreshCw } from "lucide-react";
 import { motion } from "framer-motion";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 type Filter = "all" | "live" | "upcoming" | "finished";
@@ -17,8 +17,25 @@ export default function Matches() {
   const { data: bets } = useListMyBets({
     query: { enabled: user?.status === 'approved' }
   });
-  
+
   const [filter, setFilter] = useState<Filter>("all");
+
+  // Trigger a CricAPI sync on every page visit so match statuses and scores stay fresh.
+  // The backend syncMatchesNow() runs on every /api/matches call.
+  useEffect(() => {
+    queryClient.invalidateQueries({ queryKey: ['/api/matches'] });
+  }, [queryClient]);
+
+  // Auto-refresh every 60s when there are live matches
+  const matchesArray_forEffect = Array.isArray(matches) ? matches : [];
+  const hasLiveMatches = matchesArray_forEffect.some(m => m.status === 'live');
+  useEffect(() => {
+    if (!hasLiveMatches) return;
+    const interval = setInterval(() => {
+      queryClient.invalidateQueries({ queryKey: ['/api/matches'] });
+    }, 60_000);
+    return () => clearInterval(interval);
+  }, [hasLiveMatches, queryClient]);
 
   const isApproved = user?.status === 'approved';
 

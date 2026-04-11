@@ -150,13 +150,17 @@ router.get("/leaderboard", async (req: Request, res: Response) => {
       let totalBetAmount = 0;
       let totalWon = 0;
       let settledBetAmount = 0;
+      let wins = 0;
+      let losses = 0;
       for (const bet of bets) {
         totalBetAmount += parseFloat(bet.amount as string);
-        if (bet.status === "won" || bet.status === "lost") {
+        if (bet.status === "won") {
           settledBetAmount += parseFloat(bet.amount as string);
-        }
-        if (bet.status === "won" && bet.payout) {
-          totalWon += parseFloat(bet.payout as string);
+          if (bet.payout) totalWon += parseFloat(bet.payout as string);
+          wins++;
+        } else if (bet.status === "lost") {
+          settledBetAmount += parseFloat(bet.amount as string);
+          losses++;
         }
       }
 
@@ -170,6 +174,8 @@ router.get("/leaderboard", async (req: Request, res: Response) => {
         totalWon,
         netBalance,
         totalBets: bets.length,
+        wins,
+        losses,
       };
     })
   );
