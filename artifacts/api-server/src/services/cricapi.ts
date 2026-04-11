@@ -105,7 +105,7 @@ interface CricApiMatch {
 // Cached list of all IPL 2026 matches from series_info
 let seriesMatchCache: CricApiMatch[] = [];
 let seriesCacheTime = 0;
-const SERIES_CACHE_TTL = 6 * 60 * 60 * 1000; // 6 hours
+const SERIES_CACHE_TTL = 60 * 60 * 1000; // 1 hour (fresher data)
 
 async function fetchSeriesMatches(): Promise<CricApiMatch[]> {
   const now = Date.now();
@@ -143,6 +143,27 @@ function buildScoreString(scores: CricApiScore[] | undefined): string {
       return `${team}: ${s.r}/${s.w} (${s.o})`;
     })
     .join("  •  ");
+}
+
+/** Build a JSON score object {team1Score, team2Score, result} from a match_info score array */
+function extractJsonScore(
+  scores: CricApiScore[] | undefined,
+  dbTeam1: string,
+  dbTeam2: string,
+  statusText: string,
+): { team1Score: string; team2Score: string; result: string } {
+  const result = statusText?.toLowerCase().includes("won") ? statusText : "";
+  if (!scores || scores.length === 0) return { team1Score: "", team2Score: "", result };
+
+  const t1Parts: string[] = [];
+  const t2Parts: string[] = [];
+  for (const s of scores) {
+    const inningTeam = s.inning.split(/\s+Innings?/i)[0].trim();
+    const scoreStr = `${s.r}/${s.w} (${s.o})`;
+    if (teamNamesMatch(dbTeam1, inningTeam)) t1Parts.push(scoreStr);
+    else if (teamNamesMatch(dbTeam2, inningTeam)) t2Parts.push(scoreStr);
+  }
+  return { team1Score: t1Parts.join(" & "), team2Score: t2Parts.join(" & "), result };
 }
 
 function extractWinner(statusText: string, teams: string[]): string | null {
@@ -341,9 +362,31 @@ export async function syncMatchesNow(): Promise<void> {
         if (liveEntry.ms === "live") {
           // Transition upcoming → live
           if (dbMatch.status !== "live") updates["status"] = "live";
-          // Always persist the latest live score so /api/scores can read from DB
+          // Persist score if available; if empty supplement with match_info
           if (team1Score || team2Score) {
             updates["score"] = JSON.stringify({ team1Score, team2Score });
+          } else if (dbMatch.cricapiMatchId) {
+            // cricScore says live but no score strings yet — pull from match_info directly
+            const mi = await fetchMatchInfo(dbMatch.cricapiMatchId);
+            if (mi?.score?.length) {
+              const js = extractJsonScore(mi.score, dbMatch.team1, dbMatch.team2, mi.status ?? "");
+              if (js.team1Score || js.team2Score) {
+                updates["score"] = JSON.stringify({ team1Score: js.team1Score, team2Score: js.team2Score });
+              }
+            }
+          }
+
+          // Store cricapiMatchId from series cache if not set
+          if (!dbMatch.cricapiMatchId) {
+            const matchTimestamp = new Date(dbMatch.matchDate).getTime();
+            const sm = seriesMatches.find(s => {
+              if (!s.teams || s.teams.length < 2) return false;
+              const apiTs = new Date(s.dateTimeGMT || s.date).getTime();
+              if (Math.abs(matchTimestamp - apiTs) > 48 * 60 * 60 * 1000) return false;
+              return (teamNamesMatch(dbMatch.team1, s.teams[0]) && teamNamesMatch(dbMatch.team2, s.teams[1])) ||
+                     (teamNamesMatch(dbMatch.team1, s.teams[1]) && teamNamesMatch(dbMatch.team2, s.teams[0]));
+            });
+            if (sm) updates["cricapi_match_id"] = sm.id;
           }
 
         } else if (liveEntry.ms === "result" || liveEntry.ms === "completed") {
@@ -351,20 +394,17 @@ export async function syncMatchesNow(): Promise<void> {
           if (dbMatch.status !== "finished") {
             updates["status"] = "finished";
             updates["score"] = JSON.stringify({ team1Score, team2Score, result });
-
             const winner = resolveWinner(result, dbMatch.team1, dbMatch.team2);
             if (winner) {
               updates["winner"] = winner;
-              if (dbMatch.winner !== winner) {
-                await settleMatchBets(dbMatch.id, winner);
-              }
+              if (dbMatch.winner !== winner) await settleMatchBets(dbMatch.id, winner);
             }
           } else {
-            // Already finished — update score if we have better data (team scores were previously empty)
+            // Already finished but score data was empty — update if we now have scores
             const hasTeamScores = (() => {
               if (!dbMatch.score) return false;
-              try { const p = JSON.parse(dbMatch.score) as Record<string,string>; return !!(p.team1Score || p.team2Score); }
-              catch { return true; } // plain-text score already has data
+              try { const p = JSON.parse(dbMatch.score) as Record<string, string>; return !!(p.team1Score || p.team2Score); }
+              catch { return true; }
             })();
             if (!hasTeamScores && (team1Score || team2Score || result)) {
               updates["score"] = JSON.stringify({ team1Score, team2Score, result });
@@ -372,50 +412,54 @@ export async function syncMatchesNow(): Promise<void> {
           }
         }
       } else {
-        // ── Fallback: series_info + match_info ────────────────────────────────
+        // ── cricScore didn't find match — fallback ────────────────────────────
         const matchTimestamp = new Date(dbMatch.matchDate).getTime();
-        const seriesMatch = seriesMatches.find(sm => {
-          if (!sm.teams || sm.teams.length < 2) return false;
-          const apiTs = new Date(sm.dateTimeGMT || sm.date).getTime();
-          if (Math.abs(matchTimestamp - apiTs) > 48 * 60 * 60 * 1000) return false;
-          return (
-            (teamNamesMatch(dbMatch.team1, sm.teams[0]) && teamNamesMatch(dbMatch.team2, sm.teams[1])) ||
-            (teamNamesMatch(dbMatch.team1, sm.teams[1]) && teamNamesMatch(dbMatch.team2, sm.teams[0]))
-          );
-        });
 
-        if (seriesMatch) {
-          // Always store the CricAPI match ID so the scorecard endpoint can use it
-          if (!dbMatch.cricapiMatchId) {
-            updates["cricapi_match_id"] = seriesMatch.id;
+        // Resolve CricAPI match ID: use stored one first, then find via series_info cache
+        let cricId = dbMatch.cricapiMatchId ?? null;
+        if (!cricId) {
+          const seriesMatch = seriesMatches.find(sm => {
+            if (!sm.teams || sm.teams.length < 2) return false;
+            const apiTs = new Date(sm.dateTimeGMT || sm.date).getTime();
+            if (Math.abs(matchTimestamp - apiTs) > 48 * 60 * 60 * 1000) return false;
+            return (teamNamesMatch(dbMatch.team1, sm.teams[0]) && teamNamesMatch(dbMatch.team2, sm.teams[1])) ||
+                   (teamNamesMatch(dbMatch.team1, sm.teams[1]) && teamNamesMatch(dbMatch.team2, sm.teams[0]));
+          });
+          if (seriesMatch) {
+            cricId = seriesMatch.id;
+            updates["cricapi_match_id"] = cricId;
           }
+        }
 
-          const matchInfo = await fetchMatchInfo(seriesMatch.id);
-          const apiMatch = matchInfo ?? seriesMatch;
+        if (cricId) {
+          const matchInfo = await fetchMatchInfo(cricId);
+          const apiMatch = matchInfo;
 
-          const scoreStr = buildScoreString(apiMatch.score);
+          if (apiMatch) {
+            const { team1Score, team2Score, result } = extractJsonScore(
+              apiMatch.score, dbMatch.team1, dbMatch.team2, apiMatch.status ?? ""
+            );
 
-          if (apiMatch.matchEnded) {
-            updates["status"] = "finished";
-            if (scoreStr) updates["score"] = scoreStr;
-            else if (apiMatch.status?.toLowerCase().includes("won")) updates["score"] = apiMatch.status;
-
-            const apiWinner = extractWinner(apiMatch.status, apiMatch.teams);
-            if (apiWinner) {
-              const dbWinner = teamNamesMatch(dbMatch.team1, apiWinner) ? dbMatch.team1 : dbMatch.team2;
-              updates["winner"] = dbWinner;
-              if (dbMatch.winner !== dbWinner) {
-                await settleMatchBets(dbMatch.id, dbWinner);
+            if (apiMatch.matchEnded) {
+              if (dbMatch.status !== "finished") {
+                updates["status"] = "finished";
+                updates["score"] = JSON.stringify({ team1Score, team2Score, result });
+                const apiWinner = extractWinner(apiMatch.status ?? "", apiMatch.teams);
+                if (apiWinner) {
+                  const dbWinner = teamNamesMatch(dbMatch.team1, apiWinner) ? dbMatch.team1 : dbMatch.team2;
+                  updates["winner"] = dbWinner;
+                  if (dbMatch.winner !== dbWinner) await settleMatchBets(dbMatch.id, dbWinner);
+                }
+              }
+            } else if (apiMatch.matchStarted) {
+              if (dbMatch.status !== "live") updates["status"] = "live";
+              if (team1Score || team2Score) {
+                updates["score"] = JSON.stringify({ team1Score, team2Score });
               }
             }
-          } else if (apiMatch.matchStarted && dbMatch.status !== "live") {
-            updates["status"] = "live";
-            if (scoreStr) updates["score"] = scoreStr;
           }
         } else {
-          logger.debug(
-            `CricAPI: no data found for ${dbMatch.team1} vs ${dbMatch.team2} — not in cricScore or series list`,
-          );
+          logger.debug(`CricAPI: no data found for ${dbMatch.team1} vs ${dbMatch.team2} — not in cricScore or series list`);
         }
       }
 

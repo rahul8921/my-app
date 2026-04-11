@@ -384,7 +384,7 @@ router.post("/admin/import-matches", async (req: Request, res: Response) => {
 
       const [inserted] = await db
         .insert(matchesTable)
-        .values({ team1, team2, matchDate })
+        .values({ team1, team2, matchDate, cricapiMatchId: apiMatch.id })
         .returning();
 
       imported.push(inserted);
