@@ -60,6 +60,7 @@ function RunnerIcon() {
         @keyframes rn-armF   { 0%,100%{transform:rotate(35deg)}  50%{transform:rotate(-30deg)} }
         @keyframes rn-armB   { 0%,100%{transform:rotate(-30deg)} 50%{transform:rotate(35deg)} }
         @keyframes rn-shine  { 0%,100%{opacity:0.6} 50%{opacity:1} }
+        @keyframes crown-spin { 0%{transform:rotate(-15deg) scale(1)} 25%{transform:rotate(15deg) scale(1.15)} 50%{transform:rotate(-10deg) scale(1.1)} 75%{transform:rotate(12deg) scale(1.15)} 100%{transform:rotate(-15deg) scale(1)} }
       `}</style>
       <svg width="38" height="44" viewBox="0 0 38 44" fill="none"
         style={{ animation: "rn-bounce 0.42s ease-in-out infinite" }}>
@@ -234,7 +235,7 @@ function RankingsTab({ entries, journey, user }: {
                 {/* Rank */}
                 <div className="w-14 flex-shrink-0 flex items-center justify-center">
                   {isTop ? (
-                    <span className="text-2xl" title="Top player">👑</span>
+                    <span className="text-2xl" title="Top player" style={{ display: 'inline-block', animation: 'crown-spin 2s ease-in-out infinite' }}>👑</span>
                   ) : isSecond ? (
                     <div title="Runner-up"><RunnerIcon /></div>
                   ) : poopCount > 0 ? (
@@ -505,15 +506,13 @@ export default function Leaderboard() {
               className={`px-5 py-2 rounded-lg text-sm font-semibold transition-all ${tab === "rankings" ? "bg-primary text-white shadow" : "text-muted-foreground hover:text-white"}`}>
               🏆 Rankings
             </button>
-            {isAdmin && (
-              <button onClick={() => setTab("stats")}
-                className={`px-5 py-2 rounded-lg text-sm font-semibold transition-all ${tab === "stats" ? "bg-primary text-white shadow" : "text-muted-foreground hover:text-white"}`}>
-                📊 Stats Summary
-              </button>
-            )}
+            <button onClick={() => setTab("stats")}
+              className={`px-5 py-2 rounded-lg text-sm font-semibold transition-all ${tab === "stats" ? "bg-primary text-white shadow" : "text-muted-foreground hover:text-white"}`}>
+              📊 Stats Summary
+            </button>
           </div>
 
-          {tab === "rankings" || !isAdmin
+          {tab === "rankings"
             ? <RankingsTab entries={entries} journey={journey} user={user} />
             : <StatsTab entries={entries} />
           }
