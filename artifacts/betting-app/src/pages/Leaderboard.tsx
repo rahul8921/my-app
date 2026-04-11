@@ -18,6 +18,12 @@ interface LeaderboardEntry {
   totalBets: number;
   wins: number;
   losses: number;
+  bestPayout: number;
+  biggestBet: number;
+  biggestLoss: number;
+  underdogPlayed: number;
+  underdogWins: number;
+  underdogLosses: number;
 }
 
 interface JourneyData {
@@ -318,7 +324,7 @@ function RankingsTab({ entries, journey, user }: {
 
 // ─── Stats Tab ────────────────────────────────────────────────────────────────
 
-function StatsTab({ entries }: { entries: LeaderboardEntry[] }) {
+function StatsTab({ entries, isAdmin }: { entries: LeaderboardEntry[]; isAdmin: boolean }) {
   const barData = entries.map((e, i) => {
     const w = e.wins ?? 0;
     const l = e.losses ?? 0;
@@ -368,6 +374,22 @@ function StatsTab({ entries }: { entries: LeaderboardEntry[] }) {
                 <th className="text-center px-4 py-3 font-medium text-red-400">Losses</th>
                 <th className="text-center px-4 py-3 font-medium text-yellow-400">Pending</th>
                 <th className="text-center px-4 py-3 font-medium">Win Rate</th>
+                {isAdmin && (
+                  <>
+                    <th className="text-center px-4 py-3 font-medium text-purple-400">
+                      <div>High Risk</div>
+                      <div className="text-[10px] normal-case tracking-normal font-normal text-muted-foreground">Bet minority side</div>
+                    </th>
+                    <th className="text-center px-4 py-3 font-medium text-green-300">
+                      <div>Risk Wins</div>
+                      <div className="text-[10px] normal-case tracking-normal font-normal text-muted-foreground">Won those bets</div>
+                    </th>
+                    <th className="text-center px-4 py-3 font-medium text-red-300">
+                      <div>Risk Losses</div>
+                      <div className="text-[10px] normal-case tracking-normal font-normal text-muted-foreground">Lost those bets</div>
+                    </th>
+                  </>
+                )}
                 <th className="text-right px-6 py-3 font-medium">Net Balance</th>
               </tr>
             </thead>
@@ -418,6 +440,19 @@ function StatsTab({ entries }: { entries: LeaderboardEntry[] }) {
                         <span className="text-muted-foreground">—</span>
                       )}
                     </td>
+                    {isAdmin && (
+                      <>
+                        <td className="px-4 py-4 text-center">
+                          <span className="font-bold text-purple-400">{entry.underdogPlayed}</span>
+                        </td>
+                        <td className="px-4 py-4 text-center">
+                          <span className="font-bold text-green-300">{entry.underdogWins}</span>
+                        </td>
+                        <td className="px-4 py-4 text-center">
+                          <span className="font-bold text-red-300">{entry.underdogLosses}</span>
+                        </td>
+                      </>
+                    )}
                     <td className="px-6 py-4 text-right">
                       <span className={`font-bold text-base ${positive ? "text-green-400" : "text-red-400"}`}>
                         {positive ? "+" : ""}{formatCurrency(entry.netBalance)}
@@ -514,7 +549,7 @@ export default function Leaderboard() {
 
           {tab === "rankings"
             ? <RankingsTab entries={entries} journey={journey} user={user} />
-            : <StatsTab entries={entries} />
+            : <StatsTab entries={entries} isAdmin={isAdmin} />
           }
         </>
       )}

@@ -2,6 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { db, usersTable, betsTable, matchesTable } from "@workspace/db";
 import { eq, sum, count, or } from "drizzle-orm";
 import { ApproveUserParams, RejectUserParams } from "@workspace/api-zod";
+import { cricApiGet, syncMatchesNow } from "../services/cricapi";
 
 const CRICAPI_BASE = "https://api.cricapi.com/v1";
 
@@ -140,26 +141,69 @@ router.get("/leaderboard", async (req: Request, res: Response) => {
     .from(usersTable)
     .where(eq(usersTable.status, "approved"));
 
+  // Fetch all settled bets for all matches once — used to compute pool totals
+  const allBets = await db.select().from(betsTable);
+  const allMatches = await db.select().from(matchesTable);
+
+  // Build a map of matchId -> { team1: string, team2: string, team1Pool: number, team2Pool: number }
+  const matchPoolMap = new Map<number, { team1: string; team2: string; team1Pool: number; team2Pool: number }>();
+  for (const match of allMatches) {
+    matchPoolMap.set(match.id, { team1: match.team1, team2: match.team2, team1Pool: 0, team2Pool: 0 });
+  }
+  for (const bet of allBets) {
+    const pool = matchPoolMap.get(bet.matchId);
+    if (!pool) continue;
+    const amt = parseFloat(bet.amount as string);
+    if (bet.team === pool.team1) pool.team1Pool += amt;
+    else if (bet.team === pool.team2) pool.team2Pool += amt;
+  }
+
   const result = await Promise.all(
     users.map(async (user) => {
-      const bets = await db
-        .select()
-        .from(betsTable)
-        .where(eq(betsTable.userId, user.id));
+      const bets = allBets.filter(b => b.userId === user.id);
 
       let totalBetAmount = 0;
       let totalWon = 0;
       let settledBetAmount = 0;
       let wins = 0;
       let losses = 0;
+      let bestPayout = 0;
+      let biggestBet = 0;
+      let biggestLoss = 0;
+      // Underdog bets: user bet on the side with less total pool
+      let underdogPlayed = 0;
+      let underdogWins = 0;
+      let underdogLosses = 0;
+
       for (const bet of bets) {
-        totalBetAmount += parseFloat(bet.amount as string);
+        const amt = parseFloat(bet.amount as string);
+        totalBetAmount += amt;
+        if (amt > biggestBet) biggestBet = amt;
+
+        // Check if this was an underdog bet (user's team had smaller pool)
+        const pool = matchPoolMap.get(bet.matchId);
+        if (pool) {
+          const myTeamPool = bet.team === pool.team1 ? pool.team1Pool : pool.team2Pool;
+          const otherPool = bet.team === pool.team1 ? pool.team2Pool : pool.team1Pool;
+          const isUnderdog = myTeamPool < otherPool && otherPool > 0;
+          if (isUnderdog) {
+            underdogPlayed++;
+            if (bet.status === "won") underdogWins++;
+            else if (bet.status === "lost") underdogLosses++;
+          }
+        }
+
         if (bet.status === "won") {
-          settledBetAmount += parseFloat(bet.amount as string);
-          if (bet.payout) totalWon += parseFloat(bet.payout as string);
+          settledBetAmount += amt;
+          if (bet.payout) {
+            const payout = parseFloat(bet.payout as string);
+            totalWon += payout;
+            if (payout > bestPayout) bestPayout = payout;
+          }
           wins++;
         } else if (bet.status === "lost") {
-          settledBetAmount += parseFloat(bet.amount as string);
+          settledBetAmount += amt;
+          if (amt > biggestLoss) biggestLoss = amt;
           losses++;
         }
       }
@@ -176,6 +220,12 @@ router.get("/leaderboard", async (req: Request, res: Response) => {
         totalBets: bets.length,
         wins,
         losses,
+        bestPayout,
+        biggestBet,
+        biggestLoss,
+        underdogPlayed,
+        underdogWins,
+        underdogLosses,
       };
     })
   );
@@ -405,6 +455,43 @@ router.post("/admin/import-matches", async (req: Request, res: Response) => {
   } catch (err: any) {
     res.status(500).json({ error: err.message ?? "Failed to import matches" });
   }
+});
+
+// ── Debug: see exactly what CricAPI returns ──────────────────────────────────
+router.get("/admin/debug-cricapi", async (req: Request, res: Response) => {
+  if (!isAdmin(req, res)) return;
+
+  // What's in DB
+  const dbMatches = await db.select().from(matchesTable);
+  const active = dbMatches.filter(m => m.status === "upcoming" || m.status === "live");
+
+  // Raw cricScore
+  const cricScoreResult = await cricApiGet("cricScore");
+  const allEntries = (cricScoreResult?.data as any[]) ?? [];
+
+  // IPL-related entries from cricScore
+  const iplEntries = allEntries.filter((e: any) => {
+    const t = `${e.t1 ?? ""} ${e.t2 ?? ""}`.toLowerCase();
+    return ["csk","mi","rcb","kkr","srh","dc","gt","lsg","pbks","rr",
+            "chennai","mumbai","delhi","kolkata","hyderabad","punjab",
+            "rajasthan","gujarat","lucknow","royal challengers"].some(kw => t.includes(kw));
+  });
+
+  // Force sync and capture result
+  await syncMatchesNow(true).catch(() => {});
+  const afterSync = await db.select().from(matchesTable);
+  const activeAfter = afterSync.filter(m => m.status === "upcoming" || m.status === "live");
+
+  res.json({
+    apiKeyConfigured: !!(process.env["CRICAPI_KEY"] || process.env["CRICAPI_KEY_2"]),
+    cricScore: {
+      success: !!cricScoreResult,
+      totalEntries: allEntries.length,
+      iplEntries,
+    },
+    dbMatchesBefore: active.map(m => ({ id: m.id, teams: `${m.team1} vs ${m.team2}`, status: m.status, matchDate: m.matchDate, cricapiMatchId: m.cricapiMatchId })),
+    dbMatchesAfter: activeAfter.map(m => ({ id: m.id, teams: `${m.team1} vs ${m.team2}`, status: m.status, matchDate: m.matchDate, cricapiMatchId: m.cricapiMatchId })),
+  });
 });
 
 export default router;

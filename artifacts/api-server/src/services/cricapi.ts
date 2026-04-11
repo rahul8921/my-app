@@ -113,13 +113,35 @@ async function fetchSeriesMatches(): Promise<CricApiMatch[]> {
     return seriesMatchCache;
   }
 
-  const result = await cricApiGet("series_info", { id: IPL_2026_SERIES_ID });
-  if (!result) throw new Error("CricAPI series_info: all keys failed");
-  const d = result.data as { matchList?: CricApiMatch[] } | undefined;
+  // Try hardcoded series ID first
+  let seriesResult = await cricApiGet("series_info", { id: IPL_2026_SERIES_ID });
+  let matchList = (seriesResult?.data as { matchList?: CricApiMatch[] } | undefined)?.matchList;
 
-  seriesMatchCache = d?.matchList ?? [];
+  // If hardcoded ID returned no matches, dynamically discover the current IPL series
+  if (!matchList?.length) {
+    logger.warn("CricAPI: hardcoded series ID returned no matches — discovering current IPL series");
+    const currentYear = new Date().getFullYear();
+    for (const offset of [0, 25, 50, 75]) {
+      const seriesListResult = await cricApiGet("series", { offset: String(offset) });
+      if (!seriesListResult) break;
+      const seriesList = seriesListResult.data as Array<{ id: string; name: string }> | undefined;
+      if (!seriesList?.length) break;
+      const found = seriesList.find(s => {
+        const n = (s.name ?? "").toLowerCase();
+        return (n.includes("indian premier league") || n.includes("ipl")) && n.includes(String(currentYear));
+      });
+      if (found) {
+        logger.info({ seriesId: found.id, name: found.name }, "CricAPI: found current IPL series");
+        seriesResult = await cricApiGet("series_info", { id: found.id });
+        matchList = (seriesResult?.data as { matchList?: CricApiMatch[] } | undefined)?.matchList;
+        break;
+      }
+    }
+  }
+
+  seriesMatchCache = matchList ?? [];
   seriesCacheTime = now;
-  logger.info({ count: seriesMatchCache.length }, "CricAPI: loaded IPL 2026 series match list");
+  logger.info({ count: seriesMatchCache.length }, "CricAPI: loaded IPL series match list");
   return seriesMatchCache;
 }
 
@@ -372,7 +394,11 @@ export async function syncMatchesNow(force = false): Promise<void> {
         const team1Score = isForward ? (liveEntry.t1s ?? "") : (liveEntry.t2s ?? "");
         const team2Score = isForward ? (liveEntry.t2s ?? "") : (liveEntry.t1s ?? "");
 
-        if (liveEntry.ms === "live") {
+        const msLower = (liveEntry.ms ?? "").toLowerCase();
+        const isLiveMs = msLower === "live" || msLower.includes("progress") || msLower.includes("inning");
+        const isResultMs = msLower === "result" || msLower === "completed" || msLower.includes("won") || msLower.includes("tied");
+
+        if (isLiveMs) {
           // Transition upcoming → live
           if (dbMatch.status !== "live") updates["status"] = "live";
           // Persist score if available (cricScore may be empty for first few balls — that's OK)
@@ -393,7 +419,7 @@ export async function syncMatchesNow(force = false): Promise<void> {
             if (sm) updates["cricapi_match_id"] = sm.id;
           }
 
-        } else if (liveEntry.ms === "result" || liveEntry.ms === "completed") {
+        } else if (isResultMs) {
           const result = liveEntry.status ?? "";
           if (dbMatch.status !== "finished") {
             updates["status"] = "finished";
