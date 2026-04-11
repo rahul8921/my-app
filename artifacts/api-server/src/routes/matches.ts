@@ -36,8 +36,15 @@ async function getMatchWithTotals(matchId: number) {
   };
 }
 
+// ── Force sync endpoint — used by "Check Results" button ─────────────────────
+// Bypasses the 2-minute cooldown so users can always trigger a fresh CricAPI call.
+router.post("/sync", async (req: Request, res: Response) => {
+  await syncMatchesNow(true).catch(() => {});
+  res.json({ ok: true });
+});
+
 router.get("/matches", async (req: Request, res: Response) => {
-  // Sync with CricAPI on every page load — settle bets if any match finished
+  // Sync with CricAPI on page load (throttled to once every 2 min server-side)
   await syncMatchesNow().catch(() => {});
 
   const matches = await db.select().from(matchesTable);

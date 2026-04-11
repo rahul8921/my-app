@@ -20,35 +20,25 @@ export default function Matches() {
 
   const [filter, setFilter] = useState<Filter>("all");
 
-  // Trigger a CricAPI sync on every page visit so match statuses and scores stay fresh.
-  // The backend syncMatchesNow() runs on every /api/matches call.
+  // Trigger a throttled sync on page mount (server enforces 2-min cooldown)
   useEffect(() => {
     queryClient.invalidateQueries({ queryKey: ['/api/matches'] });
   }, [queryClient]);
 
-  // Auto-refresh every 60s when there are live matches
-  const matchesArray_forEffect = Array.isArray(matches) ? matches : [];
-  const hasLiveMatches = matchesArray_forEffect.some(m => m.status === 'live');
-  useEffect(() => {
-    if (!hasLiveMatches) return;
-    const interval = setInterval(() => {
-      queryClient.invalidateQueries({ queryKey: ['/api/matches'] });
-    }, 60_000);
-    return () => clearInterval(interval);
-  }, [hasLiveMatches, queryClient]);
-
   const isApproved = user?.status === 'approved';
 
+  // "Check Results" — force-syncs CricAPI (bypasses cooldown) then refetches
   const handleRefresh = async () => {
     setIsRefreshing(true);
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['/api/matches'] }),
-      queryClient.invalidateQueries({ queryKey: ['/api/scores'] }),
-    ]);
-    await Promise.all([
-      queryClient.refetchQueries({ queryKey: ['/api/matches'] }),
-      queryClient.refetchQueries({ queryKey: ['/api/scores'] }),
-    ]);
+    try {
+      await fetch(`${import.meta.env.BASE_URL.replace(/\/$/, '')}/api/sync`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+    } catch { /* ignore network errors */ }
+    await queryClient.invalidateQueries({ queryKey: ['/api/matches'] });
+    await queryClient.invalidateQueries({ queryKey: ['/api/scores'] });
+    await queryClient.refetchQueries({ queryKey: ['/api/matches'] });
     setIsRefreshing(false);
   };
 

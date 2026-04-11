@@ -284,7 +284,14 @@ function resolveWinner(statusText: string, dbTeam1: string, dbTeam2: string): st
   return null;
 }
 
-export async function syncMatchesNow(): Promise<void> {
+// ── Sync throttle ────────────────────────────────────────────────────────────
+// Prevent hammering the CricAPI quota (100 req/day per key).
+// Normal page-loads are throttled to once every 2 minutes.
+// Force-sync (from "Check Results" button) always runs.
+let lastSyncTime = 0;
+const SYNC_COOLDOWN_MS = 2 * 60 * 1000; // 2 minutes
+
+export async function syncMatchesNow(force = false): Promise<void> {
   const hasAnyKey = process.env["CRICAPI_KEY"] || process.env["CRICAPI_KEY_2"];
   if (!hasAnyKey) {
     logger.warn("No CricAPI keys configured — skipping sync");
@@ -292,6 +299,12 @@ export async function syncMatchesNow(): Promise<void> {
   }
 
   const now = Date.now();
+
+  if (!force && now - lastSyncTime < SYNC_COOLDOWN_MS) {
+    logger.debug("CricAPI: sync skipped — last sync was less than 2 minutes ago");
+    return;
+  }
+  lastSyncTime = now;
 
   // ── Quick DB check before touching the API ───────────────────────────────
   // Fetch upcoming/live matches + finished matches missing a score (backfill)
@@ -362,18 +375,9 @@ export async function syncMatchesNow(): Promise<void> {
         if (liveEntry.ms === "live") {
           // Transition upcoming → live
           if (dbMatch.status !== "live") updates["status"] = "live";
-          // Persist score if available; if empty supplement with match_info
+          // Persist score if available (cricScore may be empty for first few balls — that's OK)
           if (team1Score || team2Score) {
             updates["score"] = JSON.stringify({ team1Score, team2Score });
-          } else if (dbMatch.cricapiMatchId) {
-            // cricScore says live but no score strings yet — pull from match_info directly
-            const mi = await fetchMatchInfo(dbMatch.cricapiMatchId);
-            if (mi?.score?.length) {
-              const js = extractJsonScore(mi.score, dbMatch.team1, dbMatch.team2, mi.status ?? "");
-              if (js.team1Score || js.team2Score) {
-                updates["score"] = JSON.stringify({ team1Score: js.team1Score, team2Score: js.team2Score });
-              }
-            }
           }
 
           // Store cricapiMatchId from series cache if not set
