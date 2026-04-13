@@ -241,7 +241,9 @@ function RankingsTab({ entries, journey, user }: {
                 {/* Rank */}
                 <div className="w-14 flex-shrink-0 flex items-center justify-center">
                   {isTop ? (
-                    <span className="text-2xl" title="Top player" style={{ display: 'inline-block', animation: 'crown-spin 2s ease-in-out infinite' }}>👑</span>
+                    <span className="text-2xl" title="Top player" style={{ display: 'inline-block', animation: 'crown-spin 2s ease-in-out infinite' }}>
+                      👑{entry.netBalance >= 50 ? '👑' : ''}
+                    </span>
                   ) : isSecond ? (
                     <div title="Runner-up"><RunnerIcon /></div>
                   ) : poopCount > 0 ? (
