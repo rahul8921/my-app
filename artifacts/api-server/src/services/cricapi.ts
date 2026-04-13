@@ -513,47 +513,59 @@ export async function syncMatchesNow(force = false): Promise<void> {
       let backfilled = 0;
       for (const dbMatch of backfillMatches) {
         try {
-          // Check cricScore first (covers recently finished matches)
+          // Check cricScore first (covers recently finished matches) — case-insensitive ms check
           const liveEntry = findCricScoreEntry(cricScoreEntries, dbMatch.team1, dbMatch.team2);
-          if (liveEntry && (liveEntry.ms === "result" || liveEntry.ms === "completed")) {
-            const { name: n1, abbr: a1 } = parseCricApiTeam(liveEntry.t1);
-            const isForward = teamNamesMatch(dbMatch.team1, n1) || teamNamesMatch(dbMatch.team1, a1);
-            const team1Score = isForward ? (liveEntry.t1s ?? "") : (liveEntry.t2s ?? "");
-            const team2Score = isForward ? (liveEntry.t2s ?? "") : (liveEntry.t1s ?? "");
-            if (team1Score || team2Score) {
-              await db.update(matchesTable)
-                .set({ score: JSON.stringify({ team1Score, team2Score, result: liveEntry.status ?? "" }), updatedAt: new Date() })
-                .where(eq(matchesTable.id, dbMatch.id));
-              logger.info(`CricAPI: backfilled score for match ${dbMatch.id} (${dbMatch.team1} vs ${dbMatch.team2}) from cricScore`);
-              backfilled++;
-              continue;
+          if (liveEntry) {
+            const msLower = (liveEntry.ms ?? "").toLowerCase();
+            const isResult = msLower === "result" || msLower === "completed" || msLower.includes("won") || msLower.includes("tied");
+            if (isResult) {
+              const { name: n1, abbr: a1 } = parseCricApiTeam(liveEntry.t1);
+              const isForward = teamNamesMatch(dbMatch.team1, n1) || teamNamesMatch(dbMatch.team1, a1);
+              const team1Score = isForward ? (liveEntry.t1s ?? "") : (liveEntry.t2s ?? "");
+              const team2Score = isForward ? (liveEntry.t2s ?? "") : (liveEntry.t1s ?? "");
+              if (team1Score || team2Score) {
+                await db.update(matchesTable)
+                  .set({ score: JSON.stringify({ team1Score, team2Score, result: liveEntry.status ?? "" }), updatedAt: new Date() })
+                  .where(eq(matchesTable.id, dbMatch.id));
+                logger.info(`CricAPI: backfilled score for match ${dbMatch.id} (${dbMatch.team1} vs ${dbMatch.team2}) from cricScore`);
+                backfilled++;
+                continue;
+              }
             }
           }
 
-          // Fallback: series_info match lookup
+          // Fallback: use stored cricapiMatchId first, then find via series_info
           const matchTimestamp = new Date(dbMatch.matchDate).getTime();
-          const seriesMatch = seriesMatches.find(sm => {
-            if (!sm.teams || sm.teams.length < 2) return false;
-            const apiTs = new Date(sm.dateTimeGMT || sm.date).getTime();
-            if (Math.abs(matchTimestamp - apiTs) > 48 * 60 * 60 * 1000) return false;
-            return (
-              (teamNamesMatch(dbMatch.team1, sm.teams[0]) && teamNamesMatch(dbMatch.team2, sm.teams[1])) ||
-              (teamNamesMatch(dbMatch.team1, sm.teams[1]) && teamNamesMatch(dbMatch.team2, sm.teams[0]))
-            );
-          });
+          let cricId = dbMatch.cricapiMatchId ?? null;
+          if (!cricId) {
+            const seriesMatch = seriesMatches.find(sm => {
+              if (!sm.teams || sm.teams.length < 2) return false;
+              const apiTs = new Date(sm.dateTimeGMT || sm.date).getTime();
+              if (Math.abs(matchTimestamp - apiTs) > 48 * 60 * 60 * 1000) return false;
+              return (
+                (teamNamesMatch(dbMatch.team1, sm.teams[0]) && teamNamesMatch(dbMatch.team2, sm.teams[1])) ||
+                (teamNamesMatch(dbMatch.team1, sm.teams[1]) && teamNamesMatch(dbMatch.team2, sm.teams[0]))
+              );
+            });
+            if (seriesMatch) cricId = seriesMatch.id;
+          }
 
-          if (seriesMatch) {
-            const matchInfo = await fetchMatchInfo(seriesMatch.id);
-            const apiMatch = matchInfo ?? seriesMatch;
-            const scoreStr = buildScoreString(apiMatch.score);
-            if (scoreStr || apiMatch.status?.toLowerCase().includes("won")) {
-              const scoreValue = scoreStr || apiMatch.status || "";
-              await db.update(matchesTable)
-                .set({ score: scoreValue, updatedAt: new Date() })
-                .where(eq(matchesTable.id, dbMatch.id));
-              logger.info(`CricAPI: backfilled score for match ${dbMatch.id} (${dbMatch.team1} vs ${dbMatch.team2}): ${scoreValue}`);
-              backfilled++;
+          if (cricId) {
+            const apiMatch = await fetchMatchInfo(cricId);
+            if (apiMatch) {
+              const { team1Score, team2Score, result } = extractJsonScore(
+                apiMatch.score, dbMatch.team1, dbMatch.team2, apiMatch.status ?? ""
+              );
+              if (team1Score || team2Score || result) {
+                await db.update(matchesTable)
+                  .set({ score: JSON.stringify({ team1Score, team2Score, result }), updatedAt: new Date() })
+                  .where(eq(matchesTable.id, dbMatch.id));
+                logger.info(`CricAPI: backfilled score for match ${dbMatch.id} (${dbMatch.team1} vs ${dbMatch.team2}): ${team1Score} / ${team2Score}`);
+                backfilled++;
+              }
             }
+          } else {
+            logger.warn(`CricAPI: no cricapiMatchId or series match found for backfill of match ${dbMatch.id} (${dbMatch.team1} vs ${dbMatch.team2})`);
           }
         } catch (err) {
           logger.warn({ err }, `CricAPI: backfill failed for match ${dbMatch.id}`);
