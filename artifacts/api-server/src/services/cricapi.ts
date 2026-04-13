@@ -306,13 +306,6 @@ function resolveWinner(statusText: string, dbTeam1: string, dbTeam2: string): st
   return null;
 }
 
-// ── Sync throttle ────────────────────────────────────────────────────────────
-// Prevent hammering the CricAPI quota (100 req/day per key).
-// Normal page-loads are throttled to once every 2 minutes.
-// Force-sync (from "Check Results" button) always runs.
-let lastSyncTime = 0;
-const SYNC_COOLDOWN_MS = 2 * 60 * 1000; // 2 minutes
-
 export async function syncMatchesNow(force = false): Promise<void> {
   const hasAnyKey = process.env["CRICAPI_KEY"] || process.env["CRICAPI_KEY_2"];
   if (!hasAnyKey) {
@@ -321,12 +314,6 @@ export async function syncMatchesNow(force = false): Promise<void> {
   }
 
   const now = Date.now();
-
-  if (!force && now - lastSyncTime < SYNC_COOLDOWN_MS) {
-    logger.debug("CricAPI: sync skipped — last sync was less than 2 minutes ago");
-    return;
-  }
-  lastSyncTime = now;
 
   // ── Quick DB check before touching the API ───────────────────────────────
   // Fetch upcoming/live matches + finished matches missing a score (backfill)
