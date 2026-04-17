@@ -242,7 +242,8 @@ function RankingsTab({ entries, journey, user }: {
                 <div className="w-14 flex-shrink-0 flex items-center justify-center">
                   {isTop ? (
                     <span className="text-2xl" title="Top player" style={{ display: 'inline-block', animation: 'crown-spin 2s ease-in-out infinite' }}>
-                      👑{entry.netBalance >= 50 ? '👑' : ''}
+                      {/* Crown tiers: 0-49=1, 50-74=2, 75-99=3, 100-124=4, etc. */}
+                      {'👑'.repeat(entry.netBalance < 50 ? 1 : 2 + Math.floor((entry.netBalance - 50) / 25))}
                     </span>
                   ) : isSecond ? (
                     <div title="Runner-up"><RunnerIcon /></div>
