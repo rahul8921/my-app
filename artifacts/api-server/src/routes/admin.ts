@@ -1,6 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db, usersTable, betsTable, matchesTable } from "@workspace/db";
-import { eq, sum, count, or } from "drizzle-orm";
+import { eq, sum, count, or, and, desc } from "drizzle-orm";
 import { ApproveUserParams, RejectUserParams } from "@workspace/api-zod";
 import { cricApiGet, syncMatchesNow } from "../services/cricapi";
 
@@ -214,6 +214,7 @@ router.get("/leaderboard", async (req: Request, res: Response) => {
         id: user.id,
         username: user.username ?? "Unknown",
         profileImage: user.customAvatarUrl ?? user.profileImageUrl ?? undefined,
+        isAdmin: user.isAdmin,
         totalBetAmount,
         totalWon,
         netBalance,
@@ -491,6 +492,177 @@ router.get("/admin/debug-cricapi", async (req: Request, res: Response) => {
     },
     dbMatchesBefore: active.map(m => ({ id: m.id, teams: `${m.team1} vs ${m.team2}`, status: m.status, matchDate: m.matchDate, cricapiMatchId: m.cricapiMatchId })),
     dbMatchesAfter: activeAfter.map(m => ({ id: m.id, teams: `${m.team1} vs ${m.team2}`, status: m.status, matchDate: m.matchDate, cricapiMatchId: m.cricapiMatchId })),
+  });
+});
+
+// ─── Admin: manage bets on behalf of users ────────────────────────────────────
+// v1 scope:
+//   - Amount is fixed at $10 (matches user-side constraint), so admin can only
+//     create/change the team — not the amount.
+//   - Settled bets (won/lost) are read-only.
+//   - Same lock rules as user-side: match must be "upcoming" and not within
+//     30 minutes of start.
+
+router.get("/admin/all-bets", async (req: Request, res: Response) => {
+  if (!isAdmin(req, res)) return;
+
+  const rows = await db
+    .select({
+      bet: betsTable,
+      user: { id: usersTable.id, username: usersTable.username, email: usersTable.email },
+      match: matchesTable,
+    })
+    .from(betsTable)
+    .leftJoin(usersTable, eq(betsTable.userId, usersTable.id))
+    .leftJoin(matchesTable, eq(betsTable.matchId, matchesTable.id))
+    .orderBy(desc(betsTable.createdAt));
+
+  res.json(rows.map(({ bet, user, match }) => ({
+    id: bet.id,
+    userId: bet.userId,
+    user: user ? { id: user.id, username: user.username ?? "Unknown", email: user.email ?? null } : null,
+    matchId: bet.matchId,
+    match: match ? {
+      id: match.id,
+      team1: match.team1,
+      team2: match.team2,
+      matchDate: match.matchDate.toISOString(),
+      status: match.status,
+      winner: match.winner,
+    } : null,
+    team: bet.team,
+    amount: parseFloat(bet.amount as string),
+    payout: bet.payout ? parseFloat(bet.payout as string) : null,
+    status: bet.status,
+    createdAt: bet.createdAt.toISOString(),
+  })));
+});
+
+router.post("/admin/bets", async (req: Request, res: Response) => {
+  if (!isAdmin(req, res)) return;
+
+  const { userId, matchId, team } = req.body as { userId?: string; matchId?: number; team?: string };
+  if (!userId || typeof matchId !== "number" || !team) {
+    res.status(400).json({ error: "userId, matchId, team are required" });
+    return;
+  }
+
+  const [targetUser] = await db.select().from(usersTable).where(eq(usersTable.id, userId));
+  if (!targetUser) {
+    res.status(404).json({ error: "Target user not found" });
+    return;
+  }
+  if (targetUser.status !== "approved") {
+    res.status(400).json({ error: "Target user is not approved — approve them first" });
+    return;
+  }
+
+  const [match] = await db.select().from(matchesTable).where(eq(matchesTable.id, matchId));
+  if (!match) {
+    res.status(404).json({ error: "Match not found" });
+    return;
+  }
+  const lockTime = new Date(match.matchDate.getTime() - 30 * 60 * 1000);
+  if (new Date() >= lockTime || match.status !== "upcoming") {
+    res.status(400).json({ error: "Betting is locked — closes 30 minutes before match start" });
+    return;
+  }
+  if (team !== match.team1 && team !== match.team2) {
+    res.status(400).json({ error: "Invalid team for this match" });
+    return;
+  }
+
+  const [existingBet] = await db
+    .select()
+    .from(betsTable)
+    .where(and(eq(betsTable.matchId, matchId), eq(betsTable.userId, userId)));
+  if (existingBet) {
+    res.status(400).json({ error: "User already has a bet on this match" });
+    return;
+  }
+
+  const [inserted] = await db
+    .insert(betsTable)
+    .values({ matchId, userId, team, amount: "10" })
+    .returning();
+
+  req.log?.info(
+    { adminId: req.user.id, action: "create_bet", betId: inserted.id, targetUserId: userId, matchId, team },
+    "[ADMIN BET] created bet on behalf of user",
+  );
+
+  res.status(201).json({
+    id: inserted.id,
+    userId: inserted.userId,
+    matchId: inserted.matchId,
+    team: inserted.team,
+    amount: parseFloat(inserted.amount as string),
+    payout: null,
+    status: inserted.status,
+    createdAt: inserted.createdAt.toISOString(),
+  });
+});
+
+router.patch("/admin/bets/:betId", async (req: Request, res: Response) => {
+  if (!isAdmin(req, res)) return;
+
+  const betId = parseInt(req.params.betId);
+  if (isNaN(betId)) {
+    res.status(400).json({ error: "Invalid bet id" });
+    return;
+  }
+
+  const { team } = req.body as { team?: string };
+  if (!team) {
+    res.status(400).json({ error: "team is required" });
+    return;
+  }
+
+  const [bet] = await db.select().from(betsTable).where(eq(betsTable.id, betId));
+  if (!bet) {
+    res.status(404).json({ error: "Bet not found" });
+    return;
+  }
+  if (bet.status !== "pending") {
+    res.status(400).json({ error: "Cannot modify a settled bet" });
+    return;
+  }
+
+  const [match] = await db.select().from(matchesTable).where(eq(matchesTable.id, bet.matchId));
+  if (!match) {
+    res.status(404).json({ error: "Match not found" });
+    return;
+  }
+  const lockTime = new Date(match.matchDate.getTime() - 30 * 60 * 1000);
+  if (new Date() >= lockTime || match.status !== "upcoming") {
+    res.status(400).json({ error: "Betting is locked — closes 30 minutes before match start" });
+    return;
+  }
+  if (team !== match.team1 && team !== match.team2) {
+    res.status(400).json({ error: "Invalid team for this match" });
+    return;
+  }
+
+  const [updated] = await db
+    .update(betsTable)
+    .set({ team })
+    .where(eq(betsTable.id, betId))
+    .returning();
+
+  req.log?.info(
+    { adminId: req.user.id, action: "update_bet", betId, oldTeam: bet.team, newTeam: team, targetUserId: bet.userId },
+    "[ADMIN BET] updated bet team",
+  );
+
+  res.json({
+    id: updated.id,
+    userId: updated.userId,
+    matchId: updated.matchId,
+    team: updated.team,
+    amount: parseFloat(updated.amount as string),
+    payout: updated.payout ? parseFloat(updated.payout as string) : null,
+    status: updated.status,
+    createdAt: updated.createdAt.toISOString(),
   });
 });
 

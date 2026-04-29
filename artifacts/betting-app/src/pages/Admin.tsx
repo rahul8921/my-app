@@ -23,7 +23,7 @@ import {
   useApproveUser,
   useRejectUser
 } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { formatCurrency } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -207,6 +207,7 @@ export default function Admin() {
           <TabsTrigger value="pending">Pending Approvals</TabsTrigger>
           <TabsTrigger value="users">All Users</TabsTrigger>
           <TabsTrigger value="matches">Manage Matches</TabsTrigger>
+          <TabsTrigger value="bets">Manage Bets</TabsTrigger>
         </TabsList>
 
         <TabsContent value="pending">
@@ -479,6 +480,10 @@ export default function Admin() {
             </div>
           )}
         </TabsContent>
+
+        <TabsContent value="bets">
+          <ManageBetsTab users={users || []} matches={allMatches} basePath={BASE} />
+        </TabsContent>
       </Tabs>
 
       {/* Edit Match Time Dialog */}
@@ -504,6 +509,277 @@ export default function Admin() {
               Save Time
             </button>
           </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// ─── Manage Bets tab ──────────────────────────────────────────────────────────
+type AdminBet = {
+  id: number;
+  userId: string;
+  user: { id: string; username: string; email: string | null } | null;
+  matchId: number;
+  match: { id: number; team1: string; team2: string; matchDate: string; status: string; winner: string | null } | null;
+  team: string;
+  amount: number;
+  payout: number | null;
+  status: "pending" | "won" | "lost";
+  createdAt: string;
+};
+
+function ManageBetsTab({ users, matches, basePath }: { users: any[]; matches: any[]; basePath: string }) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const { data: allBets, refetch } = useQuery<AdminBet[]>({
+    queryKey: ['/api/admin/all-bets'],
+    queryFn: async () => {
+      const res = await authFetch(`${basePath}/api/admin/all-bets`);
+      if (!res.ok) throw new Error("Failed to load bets");
+      return res.json();
+    },
+  });
+
+  const approvedUsers = users.filter(u => u.status === 'approved');
+  const bettableMatches = matches.filter(m => m.status === 'upcoming');
+
+  const [formUserId, setFormUserId] = useState("");
+  const [formMatchId, setFormMatchId] = useState<number | "">("");
+  const [formTeam, setFormTeam] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const [editBetId, setEditBetId] = useState<number | null>(null);
+  const [editTeam, setEditTeam] = useState("");
+  const [editSubmitting, setEditSubmitting] = useState(false);
+
+  const selectedMatch = bettableMatches.find(m => m.id === formMatchId);
+
+  function invalidateBetsAndStats() {
+    queryClient.invalidateQueries({ queryKey: ['/api/admin/all-bets'] });
+    queryClient.invalidateQueries({ queryKey: ['/api/admin/users'] });
+    queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] });
+    queryClient.invalidateQueries({ queryKey: ['/api/bets'] });
+    refetch();
+  }
+
+  async function handleCreateBet(e: React.FormEvent) {
+    e.preventDefault();
+    if (!formUserId || !formMatchId || !formTeam) {
+      toast({ variant: "destructive", title: "Missing fields", description: "Pick user, match, and team." });
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const res = await authFetch(`${basePath}/api/admin/bets`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: formUserId, matchId: formMatchId, team: formTeam }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to create bet");
+      toast({ title: "Bet placed", description: `$10 on ${formTeam} for ${approvedUsers.find(u => u.id === formUserId)?.username}` });
+      setFormUserId(""); setFormMatchId(""); setFormTeam("");
+      invalidateBetsAndStats();
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Failed", description: err.message });
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function startEdit(bet: AdminBet) {
+    setEditBetId(bet.id);
+    setEditTeam(bet.team);
+  }
+
+  async function handleSaveEdit() {
+    if (editBetId == null || !editTeam) return;
+    setEditSubmitting(true);
+    try {
+      const res = await authFetch(`${basePath}/api/admin/bets/${editBetId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ team: editTeam }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Update failed");
+      toast({ title: "Bet updated", description: `Team changed to ${editTeam}` });
+      setEditBetId(null); setEditTeam("");
+      invalidateBetsAndStats();
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Update failed", description: err.message });
+    } finally {
+      setEditSubmitting(false);
+    }
+  }
+
+  const editingBet = allBets?.find(b => b.id === editBetId);
+
+  return (
+    <div className="space-y-6">
+      {/* Create bet card */}
+      <div className="bg-card border border-white/5 rounded-2xl overflow-hidden">
+        <div className="p-6 border-b border-white/5 bg-secondary/30">
+          <h3 className="font-display font-bold text-lg text-white">Place Bet for User</h3>
+          <p className="text-sm text-muted-foreground mt-1">Amount is fixed at $10. Match must be upcoming and not within 30 minutes of start.</p>
+        </div>
+        <form onSubmit={handleCreateBet} className="p-6 grid gap-4 md:grid-cols-4 items-end">
+          <div>
+            <label className="block text-xs font-medium text-muted-foreground mb-1">User</label>
+            <select
+              value={formUserId}
+              onChange={e => setFormUserId(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg bg-background border border-white/10 text-white text-sm focus:outline-none focus:border-primary"
+            >
+              <option value="">Select user…</option>
+              {approvedUsers.map(u => (
+                <option key={u.id} value={u.id}>{u.username}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-muted-foreground mb-1">Match</label>
+            <select
+              value={formMatchId === "" ? "" : String(formMatchId)}
+              onChange={e => { setFormMatchId(e.target.value ? Number(e.target.value) : ""); setFormTeam(""); }}
+              className="w-full px-3 py-2 rounded-lg bg-background border border-white/10 text-white text-sm focus:outline-none focus:border-primary"
+            >
+              <option value="">Select match…</option>
+              {bettableMatches.map(m => (
+                <option key={m.id} value={m.id}>{m.team1} vs {m.team2} — {format(new Date(m.matchDate), "MMM d, h:mm a")}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-muted-foreground mb-1">Team</label>
+            <select
+              value={formTeam}
+              onChange={e => setFormTeam(e.target.value)}
+              disabled={!selectedMatch}
+              className="w-full px-3 py-2 rounded-lg bg-background border border-white/10 text-white text-sm focus:outline-none focus:border-primary disabled:opacity-50"
+            >
+              <option value="">Select team…</option>
+              {selectedMatch && <option value={selectedMatch.team1}>{selectedMatch.team1}</option>}
+              {selectedMatch && <option value={selectedMatch.team2}>{selectedMatch.team2}</option>}
+            </select>
+          </div>
+          <button
+            type="submit"
+            disabled={submitting}
+            className="px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-bold rounded-lg transition-all disabled:opacity-60"
+          >
+            {submitting ? "Placing…" : "Place $10 Bet"}
+          </button>
+        </form>
+      </div>
+
+      {/* Bets table */}
+      <div className="bg-card rounded-2xl border border-white/5 overflow-x-auto">
+        <div className="p-6 border-b border-white/5 bg-secondary/30 flex items-center justify-between">
+          <h3 className="font-display font-bold text-lg text-white">All Bets</h3>
+          <span className="text-sm text-muted-foreground">{allBets?.length ?? 0} total</span>
+        </div>
+        <table className="w-full text-left text-sm whitespace-nowrap">
+          <thead className="bg-secondary/50 text-muted-foreground font-medium border-b border-white/5">
+            <tr>
+              <th className="px-6 py-3">User</th>
+              <th className="px-6 py-3">Match</th>
+              <th className="px-6 py-3">Team</th>
+              <th className="px-6 py-3 text-right">Amount</th>
+              <th className="px-6 py-3 text-right">Payout</th>
+              <th className="px-6 py-3">Status</th>
+              <th className="px-6 py-3">Placed</th>
+              <th className="px-6 py-3 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/5">
+            {(allBets ?? []).map(b => {
+              const matchEditable = b.status === "pending" && b.match?.status === "upcoming"
+                && new Date(b.match.matchDate).getTime() - 30 * 60 * 1000 > Date.now();
+              return (
+                <tr key={b.id} className="hover:bg-white/[0.02]">
+                  <td className="px-6 py-3 font-medium text-white">{b.user?.username ?? "—"}</td>
+                  <td className="px-6 py-3 text-muted-foreground">
+                    {b.match ? `${b.match.team1} vs ${b.match.team2}` : "—"}
+                  </td>
+                  <td className="px-6 py-3 font-semibold text-white">{b.team}</td>
+                  <td className="px-6 py-3 text-right">{formatCurrency(b.amount)}</td>
+                  <td className="px-6 py-3 text-right text-green-400">{b.payout != null ? formatCurrency(b.payout) : "—"}</td>
+                  <td className="px-6 py-3">
+                    <span className={`px-2 py-1 rounded text-xs font-bold uppercase ${
+                      b.status === 'won' ? 'bg-green-500/10 text-green-400' :
+                      b.status === 'lost' ? 'bg-red-500/10 text-red-400' :
+                      'bg-amber-500/10 text-amber-400'
+                    }`}>{b.status}</span>
+                  </td>
+                  <td className="px-6 py-3 text-muted-foreground text-xs">{format(new Date(b.createdAt), "MMM d, h:mm a")}</td>
+                  <td className="px-6 py-3 text-right">
+                    {matchEditable ? (
+                      <button
+                        onClick={() => startEdit(b)}
+                        className="px-3 py-1 text-xs font-semibold rounded-md border border-white/10 hover:border-primary hover:bg-primary/10 text-white transition-colors inline-flex items-center gap-1"
+                      >
+                        <Pencil className="h-3 w-3" /> Edit team
+                      </button>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">locked</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+            {allBets && allBets.length === 0 && (
+              <tr><td colSpan={8} className="px-6 py-12 text-center text-muted-foreground">No bets yet.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Edit team dialog */}
+      <Dialog open={editBetId !== null} onOpenChange={(open) => { if (!open) { setEditBetId(null); setEditTeam(""); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Bet Team</DialogTitle>
+          </DialogHeader>
+          {editingBet?.match && (
+            <div className="space-y-4">
+              <div className="text-sm text-muted-foreground">
+                <span className="text-white font-medium">{editingBet.user?.username}</span> · {editingBet.match.team1} vs {editingBet.match.team2}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {[editingBet.match.team1, editingBet.match.team2].map(t => (
+                  <button
+                    key={t}
+                    onClick={() => setEditTeam(t)}
+                    className={`py-3 px-4 rounded-lg border font-semibold transition-colors ${
+                      editTeam === t
+                        ? "border-primary bg-primary/15 text-white"
+                        : "border-white/10 hover:border-white/30 text-muted-foreground"
+                    }`}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  onClick={() => { setEditBetId(null); setEditTeam(""); }}
+                  className="px-4 py-2 text-sm font-semibold rounded-lg border border-white/10 hover:border-white/30 text-muted-foreground transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveEdit}
+                  disabled={editSubmitting || !editTeam || editTeam === editingBet.team}
+                  className="px-4 py-2 text-sm font-bold rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground transition-all disabled:opacity-60"
+                >
+                  {editSubmitting ? "Saving…" : "Save"}
+                </button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

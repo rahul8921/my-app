@@ -12,6 +12,7 @@ interface LeaderboardEntry {
   id: string;
   username: string;
   profileImage?: string;
+  isAdmin?: boolean;
   totalBetAmount: number;
   totalWon: number;
   netBalance: number;
@@ -128,7 +129,7 @@ function RunnerIcon() {
 
 const LINE_COLORS = ["#f59e0b","#22c55e","#3b82f6","#a855f7","#ef4444","#06b6d4","#ec4899","#84cc16"];
 
-function PoopIcon({ count }: { count: 1 | 2 }) {
+function PoopIcon({ count }: { count: number }) {
   return (
     <>
       <style>{`
@@ -153,7 +154,7 @@ function PoopIcon({ count }: { count: 1 | 2 }) {
           50%      { opacity:0.7; transform: translateY(-6px) scale(1.1); }
         }
       `}</style>
-      <div className={`flex ${count === 2 ? "gap-0.5" : ""} items-end relative`}
+      <div className={`flex ${count > 1 ? "gap-0.5" : ""} items-end relative flex-wrap`}
         style={{ animation: "poop-bounce 1.2s ease-in-out infinite" }}>
         {/* stink lines */}
         <div className="absolute -top-3 left-1/2 -translate-x-1/2 flex gap-1 pointer-events-none">
@@ -164,18 +165,16 @@ function PoopIcon({ count }: { count: 1 | 2 }) {
             </span>
           ))}
         </div>
-        <span className="text-xl leading-none select-none"
-          style={{ animation: "poop-wobble 0.9s ease-in-out infinite" }}
-          title="Way down in the hole 💩">
-          💩
-        </span>
-        {count === 2 && (
-          <span className="text-xl leading-none select-none"
-            style={{ animation: "poop-wobble2 0.9s ease-in-out infinite", animationDelay: "0.15s" }}
-            title="Catastrophically bad 💩💩">
+        {Array.from({ length: count }).map((_, i) => (
+          <span key={i} className="text-xl leading-none select-none"
+            style={{
+              animation: `${i % 2 === 0 ? "poop-wobble" : "poop-wobble2"} 0.9s ease-in-out infinite`,
+              animationDelay: `${i * 0.15}s`,
+            }}
+            title={`Way down in the hole ${"💩".repeat(count)}`}>
             💩
           </span>
-        )}
+        ))}
       </div>
     </>
   );
@@ -230,10 +229,14 @@ function RankingsTab({ entries, journey, user }: {
             const isSecond = index === 1 && entries.length > 2;
             const isMe = entry.id === user?.id;
             const positive = entry.netBalance >= 0;
-            // poop tiers: -50 to -99 = 1 poop, -100+ = 2 poops, else LOSER badge
-            const poopCount = isBottom
-              ? entry.netBalance <= -100 ? 2 : entry.netBalance <= -50 ? 1 : 0
+            // poop tiers: +1 poop per $25 deeper, anchored so -75 = 2 poops
+            // -50 → 1, -75 → 2, -100 → 3, -125 → 4, ...; reduces as balance climbs back
+            // Temporary (expires 2026-05-03): bottom-ranked admin gets +1 bonus poop
+            const baseCount = isBottom
+              ? Math.max(0, Math.floor(-entry.netBalance / 25) - 1)
               : 0;
+            const adminBonusActive = Date.now() < new Date("2026-05-03T00:00:00").getTime();
+            const poopCount = baseCount + (isBottom && entry.isAdmin && adminBonusActive && entry.netBalance < 0 ? 1 : 0);
 
             return (
               <div key={entry.id}
@@ -248,7 +251,7 @@ function RankingsTab({ entries, journey, user }: {
                   ) : isSecond ? (
                     <div title="Runner-up"><RunnerIcon /></div>
                   ) : poopCount > 0 ? (
-                    <PoopIcon count={poopCount as 1 | 2} />
+                    <PoopIcon count={poopCount} />
                   ) : isBottom ? (
                     <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-red-500/20 text-red-400 border border-red-500/30 whitespace-nowrap">
                       LOSER
